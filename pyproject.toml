@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mmocc"
+version = "1.0.0"
+description = "Species occupancy modeling with multimodal data"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Timm Haucke", email = "haucke@mit.edu"}
+]
+keywords = ["python", "occupancy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+]
+
+dependencies = [
+    "biolith==0.0.15",
+    "fire==0.7.1",
+    "geopandas",
+    "huez",
+    "ipykernel==7.1.0",
+    "ipywidgets==8.1.8",
+    "joblib==1.5.2",
+    "polars==1.35.2",
+    "python-dotenv==1.2.1",
+    "rangepy @ git+https://github.com/timmh/rangepy.git",
+    "requests==2.32.5",
+    "scikit-learn==1.7.2",
+    "seaborn",
+    "submitit==1.5.3",
+    "torch",
+    "torchvision",
+]
+
+[project.optional-dependencies]
+all_steps = [
+    "geogist @ git+https://github.com/timmh/geogist.git",
+    "onnx2torch==1.5.15",
+    "open-clip-torch==3.2.0",
+    "PyTorchWildlife==1.2.4.2",
+    "pyvisdiff @ git+https://github.com/timmh/pyvisdiff.git",
+]
+figures = [
+    "rpy2",
+    "umap-learn",
+]
+dev = [
+    "black[jupyter]",
+    "docformatter",
+    "isort",
+]
+
+[project.urls]
+Source = "https://github.com/timmh/multimoodal-occupancy"
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.uv]
+cache-keys = [{ file = "mmocc/**/*.py" }]
