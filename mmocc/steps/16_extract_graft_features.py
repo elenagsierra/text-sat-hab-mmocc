@@ -7,6 +7,7 @@
 #     "omegaconf==2.3.0",
 #     "Pillow",
 #     "requests==2.32.5",
+#     "setuptools",
 #     "tqdm",
 #     "transformers",
 # ]

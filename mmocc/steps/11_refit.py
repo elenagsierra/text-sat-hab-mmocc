@@ -4,6 +4,7 @@
 # dependencies = [
 #     "mmocc",
 #     "open-clip-torch==3.2.0",
+#     "setuptools",
 # ]
 #
 # [tool.uv.sources]

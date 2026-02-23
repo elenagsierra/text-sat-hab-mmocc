@@ -4,6 +4,7 @@
 # dependencies = [
 #     "mmocc",
 #     "pyvisdiff",
+#     "setuptools",
 # ]
 #
 # [tool.uv.sources]

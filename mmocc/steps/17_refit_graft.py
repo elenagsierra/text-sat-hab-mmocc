@@ -4,6 +4,7 @@
 # dependencies = [
 #     "mmocc",
 #     "earthengine-api==1.4.0",
+#     "setuptools",
 #     "transformers",
 # ]
 #
