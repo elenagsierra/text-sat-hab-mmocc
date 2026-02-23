@@ -8,7 +8,7 @@
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
-"""Generate qualitative HTML previews of camera-trap image rankings from multimodal
+"""Generate qualitative HTML previews of satellite imagery rankings from multimodal
 occupancy model results."""
 
 import base64
@@ -32,8 +32,8 @@ from mmocc.config import (
 from mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
-    load_image_lookup,
-    rank_image_groups,
+    load_sat_lookup,
+    rank_sat_groups,
     resolve_fit_results_path,
 )
 from mmocc.utils import (
@@ -43,7 +43,7 @@ from mmocc.utils import (
 )
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_MODALITY = "image,sat,covariates"
+DEFAULT_MODALITY = "sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 OUTPUT_DIR = cache_path / "html_previews"
@@ -55,19 +55,19 @@ PLACEHOLDER_PIXEL = "data:image/gif;base64,R0lGODlhAQABAAD/ACw="
 CATEGORY_DESCRIPTIONS = {
     ("standard", "positive"): (
         "Most confidently occupied",
-        "These are the images the model rates as most likely to be occupied by the species of interest, irrespective of other predictors like environmental covariates.",
+        "These are the satellite images the model rates as most likely to be occupied by the species of interest, irrespective of other predictors like environmental covariates.",
     ),
     ("standard", "negative"): (
         "Most confidently NOT occupied",
-        "These are the images the model rates as most likely to NOT be occupied by the species of interest, irrespective of other predictors like environmental covariates.",
+        "These are the satellite images the model rates as most likely to NOT be occupied by the species of interest, irrespective of other predictors like environmental covariates.",
     ),
     ("unique", "positive"): (
         "Most confidently occupied (maximum disagreement with covariates)",
-        "These are the images the model rates as most likely to be occupied, but where other predictors such as environmental covariates would suggest otherwise.",
+        "These are the satellite images the model rates as most likely to be occupied, but where other predictors such as environmental covariates would suggest otherwise.",
     ),
     ("unique", "negative"): (
         "Most confidently NOT occupied (maximum disagreement with covariates)",
-        "These are the images the model rates as least likely to be occupied, but where other predictors such as environmental covariates would suggest otherwise.",
+        "These are the satellite images the model rates as least likely to be occupied, but where other predictors such as environmental covariates would suggest otherwise.",
     ),
 }
 
@@ -148,8 +148,8 @@ def normalize_modalities_arg(value: Sequence[str] | str | None) -> List[List[str
     modality_specs = _ensure_list(value, [DEFAULT_MODALITY])
     modalities = [parse_modalities(spec) for spec in modality_specs]
     for spec in modalities:
-        if "image" not in spec:
-            raise ValueError("Each modality set must include the 'image' modality.")
+        if "sat" not in spec:
+            raise ValueError("Each modality set must include the 'sat' modality.")
     return modalities
 
 
@@ -176,24 +176,26 @@ def normalize_species_ids(value: Sequence[str] | str | None) -> List[str]:
     return species
 
 
-def image_to_data_uri(path: str) -> str:
+def sat_to_data_uri(path: str) -> str:
+    """Convert satellite image to data URI for embedding in HTML."""
     if not path:
         return ""
     try:
         with Image.open(path) as img:
             img = img.convert("RGB")
             with BytesIO() as buffer:
-                img.save(buffer, format="JPEG")
+                img.save(buffer, format="PNG")
                 encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
-                return f"data:image/jpeg;base64,{encoded}"
+                return f"data:image/png;base64,{encoded}"
     except Exception as exc:
-        LOGGER.warning("Failed to encode image %s: %s", path, exc)
+        LOGGER.warning("Failed to encode satellite image %s: %s", path, exc)
         return ""
 
 
-def create_image_grid_html(
+def create_sat_grid_html(
     df: pd.DataFrame, title: str, description: str | None = None
 ) -> str:
+    """Create HTML grid for satellite imagery."""
     if df.empty:
         return ""
 
@@ -201,36 +203,44 @@ def create_image_grid_html(
 
     tiles: List[str] = []
     for _, row in df.iterrows():
-        data_uri = image_to_data_uri(str(row.get("image_path", "")))
-        if not data_uri:
-            continue
+        # Use local satellite image if available, otherwise use web service
+        sat_path = row.get("sat_path", "")
+        if sat_path and Path(sat_path).exists():
+            data_uri = sat_to_data_uri(str(sat_path))
+        else:
+            data_uri = ""
+        
         caption = row.get("loc_id") or row.get("site_id") or ""
-        caption = html.escape(str(caption)) or "Camera trap image"
-        sat_url = build_s2cloudless_tile_url(row.get("Latitude"), row.get("Longitude"))
+        caption = html.escape(str(caption)) or "Satellite image"
+        
+        # Build S2 cloudless tile as fallback/additional view
+        s2_url = build_s2cloudless_tile_url(row.get("Latitude"), row.get("Longitude"))
         external_link = build_external_link(row.get("Latitude"), row.get("Longitude"))
+        
         sat_alt = (
-            f"Sentinel-2 cloudless tile near {caption}"
+            f"Satellite imagery near {caption}"
             if caption.strip()
-            else "Sentinel-2 cloudless tile"
+            else "Satellite imagery"
         )
-        sat_img_tag = ""
-        if sat_url:
+        
+        # Primary satellite image (local or S2 cloudless)
+        primary_src = data_uri if data_uri else s2_url
+        if not primary_src:
+            continue
+            
+        sat_img_tag = (
+            f'<img class="sat-image lazy-img" src="{PLACEHOLDER_PIXEL}" '
+            f'data-src="{html.escape(primary_src, quote=True)}" alt="{sat_alt}" '
+            f'title="{sat_alt}" loading="lazy" decoding="async" />'
+        )
+        if external_link:
             sat_img_tag = (
-                f'<img class="sat-image lazy-img" src="{PLACEHOLDER_PIXEL}" '
-                f'data-src="{html.escape(sat_url, quote=True)}" alt="{sat_alt}" '
-                f'title="{sat_alt}" loading="lazy" decoding="async" />'
+                f'<a href="{html.escape(external_link, quote=True)}" target="_blank" '
+                f'rel="noopener noreferrer">{sat_img_tag}</a>'
             )
-            if external_link:
-                sat_img_tag = (
-                    f'<a href="{html.escape(external_link, quote=True)}" target="_blank" '
-                    f'rel="noopener noreferrer">{sat_img_tag}</a>'
-                )
         tiles.append(
-            '<figure class="image-pair">'
-            f'<img class="cam-image lazy-img" src="{PLACEHOLDER_PIXEL}" '
-            f'data-src="{data_uri}" alt="{caption}" title="{caption}" '
-            'loading="lazy" decoding="async" />'
-            f"{sat_img_tag}</figure>"
+            f'<figure class="sat-tile">{sat_img_tag}'
+            f'<figcaption>{caption}</figcaption></figure>'
         )
 
     if not tiles:
@@ -260,7 +270,7 @@ def render_species_page(
             (mode, polarity),
             (f"{mode.title()} ({polarity})", None),
         )
-        html_block = create_image_grid_html(df, title, description)
+        html_block = create_sat_grid_html(df, title, description)
         if html_block:
             sections_html.append(html_block)
 
@@ -271,10 +281,9 @@ def render_species_page(
         <ul>
             <li><strong>Taxon ID:</strong> {html.escape(taxon_id)}</li>
             <li><strong>Modalities:</strong> {html.escape(str(summary['modalities']))}</li>
-            <li><strong>Image backbone:</strong> {html.escape(str(summary['image_backbone']))}</li>
             <li><strong>Satellite backbone:</strong> {html.escape(str(summary['sat_backbone']))}</li>
             <li><strong>Unique test sites:</strong> {summary['unique_test_sites']}</li>
-            <li><strong>Images shown:</strong> {summary['num_images']}</li>
+            <li><strong>Satellite images shown:</strong> {summary['num_images']}</li>
         </ul>
     """
 
@@ -284,7 +293,7 @@ def render_species_page(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visual Differences for {html.escape(species_name)}</title>
+    <title>Satellite-based Habitat Differences for {html.escape(species_name)}</title>
     <style>
         :root {{ --img-scale: 1; }}
         body {{ font-family: sans-serif; margin: 2em; max-width: 1100px; }}
@@ -294,53 +303,44 @@ def render_species_page(
         .zoom-control {{ display: flex; align-items: center; gap: 0.75rem; font-size: 0.95rem; flex-wrap: wrap; }}
         .zoom-value {{ font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }}
         .image-grid {{ display: flex; flex-wrap: wrap; gap: 12px; padding: 10px; border: 1px solid #ccc; margin-bottom: 20px; }}
-        .image-pair {{ margin: 0; display: flex; align-items: flex-start; gap: 8px; padding: 6px; border-radius: 6px; background: #f9f9f9; }}
-        .image-pair img {{ border: 1px solid #ddd; border-radius: 4px; background: #fff; }}
-        .cam-image {{ height: calc(256px * var(--img-scale)); width: auto; object-fit: cover; }}
+        .sat-tile {{ margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border-radius: 6px; background: #f9f9f9; }}
+        .sat-tile img {{ border: 1px solid #ddd; border-radius: 4px; background: #fff; }}
+        .sat-tile figcaption {{ font-size: 0.8em; color: #666; max-width: calc(256px * var(--img-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .sat-image {{ width: calc(256px * var(--img-scale)); height: calc(256px * var(--img-scale)); object-fit: cover; }}
-        .hide-sat .sat-image {{ display: none; }}
-        .hide-sat .image-pair {{ gap: 0; }}
     </style>
 </head>
 <body>
     <div class="page-header">
         <div>
             <h1>{html.escape(species_name)}</h1>
-            <p>Qualitative comparison of camera-trap imagery ranked by multimodal occupancy models.</p>
+            <p>Qualitative comparison of satellite imagery ranked by multimodal occupancy models.</p>
         </div>
         <div class="zoom-control">
             <label for="zoom-slider">Zoom:</label>
             <input type="range" id="zoom-slider" min="0.2" max="8" step="0.1" value="1" />
             <span id="zoom-value" class="zoom-value"></span>
-            <label><input type="checkbox" id="toggle-sat" checked /> Show satellite tiles</label>
         </div>
     </div>
     <section>
         {summary_html}
     </section>
     <p>
-        These camera trap images from the <a href="https://www.snapshot-usa.org/">Snapshot USA network</a> are scored by our multimodal occupancy models.
+        These satellite images correspond to locations from the <a href="https://www.snapshot-usa.org/">Snapshot USA network</a> and are scored by our multimodal occupancy models.
         Images near the top of a group are the most representative for that hypothesis. We provide four categories:
-        confident positives, confident negatives, and their counterparts that disagree with non-visual modalities.
+        confident positives, confident negatives, and their counterparts that disagree with covariate-based modalities.
     </p>
     {''.join(sections_html)}
     <script>
         document.addEventListener("DOMContentLoaded", () => {{
             const slider = document.getElementById("zoom-slider");
             const valueLabel = document.getElementById("zoom-value");
-            const toggleSat = document.getElementById("toggle-sat");
             const updateScale = () => {{
                 const scale = parseFloat(slider.value);
                 document.documentElement.style.setProperty("--img-scale", scale.toFixed(2));
                 valueLabel.textContent = `${{Math.round(scale * 100)}}%`;
             }};
-            const updateSatelliteVisibility = () => {{
-                document.body.classList.toggle("hide-sat", !toggleSat.checked);
-            }};
             slider.addEventListener("input", updateScale);
-            toggleSat.addEventListener("change", updateSatelliteVisibility);
             updateScale();
-            updateSatelliteVisibility();
 
             const lazyImages = Array.from(document.querySelectorAll("img[data-src]"));
             const loadImage = (img) => {{
@@ -385,20 +385,20 @@ def write_index(entries: List[Dict[str, str]], output_dir: Path) -> Path:
             f"<tr>"
             f"<td><a href=\"{html.escape(entry['filename'])}\">{html.escape(entry['species'])}</a></td>"
             f"<td>{html.escape(entry['modalities'])}</td>"
-            f"<td>{html.escape(entry['image_backbone'])}</td>"
             f"<td>{html.escape(entry['sat_backbone'])}</td>"
             f"<td>{entry['unique_test_sites']}</td>"
             f"<td>{entry['num_images']}</td>"
             f"</tr>"
         )
 
+    rows_html = "\n".join(rows)
     index_html = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Species Ranking Previews</title>
+    <title>Satellite Imagery Ranking Previews</title>
     <style>
         body {{ font-family: sans-serif; margin: 2em; }}
         table {{ border-collapse: collapse; width: 100%; max-width: 1100px; }}
@@ -408,21 +408,20 @@ def write_index(entries: List[Dict[str, str]], output_dir: Path) -> Path:
     </style>
 </head>
 <body>
-    <h1>Qualitative Ranking Previews</h1>
-    <p>Each row links to a qualitative gallery summarizing the camera-trap imagery used in VisDiff analyses.</p>
+    <h1>Qualitative Satellite Ranking Previews</h1>
+    <p>Each row links to a qualitative gallery summarizing the satellite imagery used in VisDiff analyses.</p>
     <table>
         <thead>
             <tr>
                 <th>Species</th>
                 <th>Modalities</th>
-                <th>Image Backbone</th>
                 <th>Satellite Backbone</th>
                 <th>Unique Test Sites</th>
-                <th>Images</th>
+                <th>Satellite Images</th>
             </tr>
         </thead>
         <tbody>
-            {'\n'.join(rows)}
+            {rows_html}
         </tbody>
     </table>
 </body>
@@ -443,7 +442,6 @@ def slugify(value: str) -> str:
 def generate_html_previews(
     species_ids: Sequence[str] | str | None = None,
     modalities: Sequence[str] | str | None = None,
-    image_backbones: Sequence[str] | str | None = None,
     sat_backbones: Sequence[str] | str | None = None,
     modes: Sequence[str] | str | None = None,
     top_k: int = 20,
@@ -452,129 +450,123 @@ def generate_html_previews(
 ) -> Path:
     species_list = normalize_species_ids(species_ids)
     modality_sets = normalize_modalities_arg(modalities)
-    image_backbone_list = normalize_backbones(image_backbones, default_image_backbone)
     sat_backbone_list = normalize_backbones(sat_backbones, default_sat_backbone)
     modes_list = normalize_modes(modes)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    image_lookup = load_image_lookup()
+    sat_lookup = load_sat_lookup()
     taxon_map = get_taxon_map()
     entries: List[Dict[str, str]] = []
 
     for taxon_id in species_list:
         species_name = taxon_map.get(taxon_id, taxon_id)
         for modalities_set in modality_sets:
-            for image_backbone in image_backbone_list:
-                for sat_backbone in sat_backbone_list:
-                    try:
-                        (
-                            fit_path,
-                            resolved_modalities,
-                            resolved_image_backbone,
-                            resolved_sat_backbone,
-                        ) = resolve_fit_results_path(
-                            taxon_id,
-                            modalities_set,
-                            image_backbone,
-                            sat_backbone,
-                        )
-                    except FileNotFoundError as exc:
-                        LOGGER.warning(
-                            "Skipping %s (%s): %s", species_name, taxon_id, exc
-                        )
-                        continue
-
-                    fit_results = load_fit_results(fit_path)
-                    site_scores, display_name = compute_site_scores(
-                        taxon_id,
+            for sat_backbone in sat_backbone_list:
+                try:
+                    (
+                        fit_path,
                         resolved_modalities,
                         resolved_image_backbone,
                         resolved_sat_backbone,
-                        fit_results,
+                    ) = resolve_fit_results_path(
+                        taxon_id,
+                        modalities_set,
+                        None,
+                        sat_backbone,
                     )
-                    site_scores = site_scores.join(
-                        image_lookup, on="loc_id", how="left"
+                except FileNotFoundError as exc:
+                    LOGGER.warning(
+                        "Skipping %s (%s): %s", species_name, taxon_id, exc
                     )
-                    site_scores["image_exists"] = (
-                        site_scores["image_exists"].fillna(False).astype(bool)
-                    )
+                    continue
 
-                    sections: List[Tuple[str, str, pd.DataFrame]] = []
-                    for mode in modes_list:
-                        positives, negatives = rank_image_groups(
-                            site_scores,
-                            resolved_modalities,
-                            mode,
-                            unique_weight,
-                            top_k,
-                            test=True,
-                        )
-                        if not positives.empty:
-                            sections.append((mode, "positive", positives))
-                        if not negatives.empty:
-                            sections.append((mode, "negative", negatives))
+                fit_results = load_fit_results(fit_path)
+                site_scores, display_name = compute_site_scores(
+                    taxon_id,
+                    resolved_modalities,
+                    resolved_image_backbone,
+                    resolved_sat_backbone,
+                    fit_results,
+                )
+                site_scores = site_scores.join(
+                    sat_lookup, on="loc_id", how="left"
+                )
+                site_scores["sat_exists"] = (
+                    site_scores["sat_exists"].fillna(False).astype(bool)
+                )
 
-                    if not sections:
-                        LOGGER.warning(
-                            "Insufficient imagery to build previews for %s (%s).",
-                            display_name,
-                            taxon_id,
-                        )
-                        continue
-
-                    unique_sites = int(
-                        site_scores.loc[site_scores["is_test"], "loc_id"]
-                        .dropna()
-                        .nunique()
+                sections: List[Tuple[str, str, pd.DataFrame]] = []
+                for mode in modes_list:
+                    positives, negatives = rank_sat_groups(
+                        site_scores,
+                        resolved_modalities,
+                        mode,
+                        unique_weight,
+                        top_k,
+                        test=True,
                     )
-                    num_images = sum(len(df) for _, _, df in sections)
+                    if not positives.empty:
+                        sections.append((mode, "positive", positives))
+                    if not negatives.empty:
+                        sections.append((mode, "negative", negatives))
 
-                    summary = dict(
-                        modalities=", ".join(resolved_modalities),
-                        image_backbone=resolved_image_backbone
-                        or default_image_backbone,
-                        sat_backbone=resolved_sat_backbone or default_sat_backbone,
-                        unique_test_sites=unique_sites,
-                        num_images=num_images,
+                if not sections:
+                    LOGGER.warning(
+                        "Insufficient satellite imagery to build previews for %s (%s).",
+                        display_name,
+                        taxon_id,
                     )
+                    continue
 
-                    slug = slugify(display_name)
-                    filename = (
-                        f"{slug}_{resolved_image_backbone or 'default'}_"
-                        f"{resolved_sat_backbone or 'default'}_"
-                        f"{'-'.join(sorted(resolved_modalities))}.html"
-                    )
-                    output_path = output_dir / filename
-                    try:
-                        render_species_page(
-                            display_name,
-                            taxon_id,
-                            summary,
-                            sections,
-                            output_path,
-                        )
-                    except RuntimeError as exc:
-                        LOGGER.warning(
-                            "Skipping HTML page for %s (%s): %s",
-                            display_name,
-                            taxon_id,
-                            exc,
-                        )
-                        continue
+                unique_sites = int(
+                    site_scores.loc[site_scores["is_test"], "loc_id"]
+                    .dropna()
+                    .nunique()
+                )
+                num_images = sum(len(df) for _, _, df in sections)
 
-                    entries.append(
-                        dict(
-                            species=display_name,
-                            filename=filename,
-                            modalities=str(summary["modalities"]),
-                            image_backbone=str(summary["image_backbone"]),
-                            sat_backbone=str(summary["sat_backbone"]),
-                            unique_test_sites=str(summary["unique_test_sites"]),
-                            num_images=str(summary["num_images"]),
-                        )
+                summary = dict(
+                    modalities=", ".join(resolved_modalities),
+                    sat_backbone=resolved_sat_backbone or default_sat_backbone,
+                    unique_test_sites=unique_sites,
+                    num_images=num_images,
+                )
+
+                slug = slugify(display_name)
+                filename = (
+                    f"{slug}_{resolved_sat_backbone or 'default'}_"
+                    f"{'-'.join(sorted(resolved_modalities))}.html"
+                )
+                output_path = output_dir / filename
+                try:
+                    render_species_page(
+                        display_name,
+                        taxon_id,
+                        summary,
+                        sections,
+                        output_path,
                     )
+                except RuntimeError as exc:
+                    LOGGER.warning(
+                        "Skipping HTML page for %s (%s): %s",
+                        display_name,
+                        taxon_id,
+                        exc,
+                    )
+                    continue
+
+                entries.append(
+                    dict(
+                        species=display_name,
+                        filename=filename,
+                        modalities=str(summary["modalities"]),
+                        sat_backbone=str(summary["sat_backbone"]),
+                        unique_test_sites=str(summary["unique_test_sites"]),
+                        num_images=str(summary["num_images"]),
+                    )
+                )
 
     if not entries:
         raise RuntimeError("No HTML previews were generated for any species.")
@@ -586,7 +578,6 @@ def generate_html_previews(
 def main(
     species_ids: Sequence[str] | str | None = None,
     modalities: Sequence[str] | str | None = None,
-    image_backbones: Sequence[str] | str | None = None,
     sat_backbones: Sequence[str] | str | None = None,
     modes: Sequence[str] | str | None = None,
     top_k: int = 20,
@@ -603,7 +594,6 @@ def main(
         generate_html_previews,
         species_ids,
         modalities,
-        image_backbones,
         sat_backbones,
         modes,
         top_k,

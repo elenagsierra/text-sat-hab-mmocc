@@ -10,7 +10,7 @@
 # mmocc = { path = "../.." }
 # ///
 """Quantify train/test domain shift per species across modalities and detection
-rates."""
+rates. Uses satellite remote sensing features."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +29,6 @@ from tqdm import tqdm
 from mmocc import utils as mm_utils
 from mmocc.config import (
     cache_path,
-    default_image_backbone,
     default_sat_backbone,
     limit_to_range,
     pca_dim,
@@ -130,7 +129,6 @@ def _fill_missing(train: np.ndarray, test: np.ndarray) -> tuple[np.ndarray, np.n
 
 def _prepare_base_data(
     modalities: set[str],
-    image_backbone: str,
     sat_backbone: str,
     apply_range_filter: bool,
 ) -> BaseData:
@@ -155,16 +153,15 @@ def _prepare_base_data(
 
     feature_path = cache_path / "features"
     ids_all = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}_ids.npy"
+        feature_path / f"wi_blank_sat_features_{sat_backbone}_ids.npy",
+        allow_pickle=True,
     )
-    image_features = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}.npy"
-    )
-    sat_features = np.load(feature_path / f"wi_blank_sat_features_{sat_backbone}.npy")
+    sat_features = np.load(feature_path / f"wi_blank_sat_features_{sat_backbone}.npy", allow_pickle=True)
     covariates = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}_covariates.npy"
+        feature_path / f"wi_blank_sat_features_{sat_backbone}_covariates.npy",
+        allow_pickle=True,
     )
-    locs = np.load(feature_path / f"wi_blank_image_features_{image_backbone}_locs.npy")
+    locs = np.load(feature_path / f"wi_blank_sat_features_{sat_backbone}_locs.npy", allow_pickle=True)
 
     latitudes_all = locs[:, 0]
     longitudes_all = locs[:, 1]
@@ -185,7 +182,6 @@ def _prepare_base_data(
     site_idx_all = location_map_df["Location_Index"][ids_all].to_numpy()
 
     feature_bank = dict(
-        image=image_features,
         sat=sat_features,
         covariates=covariates,
     )
@@ -534,8 +530,7 @@ def _iter_records(
 
 def main(
     species_ids: str | Sequence[str] | None = None,
-    modalities: Sequence[str] = ("image", "sat", "covariates"),
-    image_backbone: str | None = None,
+    modalities: Sequence[str] = ("sat", "covariates"),
     sat_backbone: str | None = None,
     pca_components: int = pca_dim,
     max_samples: int = 1500,
@@ -558,7 +553,6 @@ def main(
     if not modality_set:
         raise ValueError("At least one modality must be specified.")
 
-    image_backbone_final = image_backbone or default_image_backbone
     sat_backbone_final = sat_backbone or default_sat_backbone
     range_filter = (
         limit_to_range if apply_range_filter is None else bool(apply_range_filter)
@@ -566,7 +560,6 @@ def main(
 
     base_data = _prepare_base_data(
         modalities=modality_set,
-        image_backbone=image_backbone_final,
         sat_backbone=sat_backbone_final,
         apply_range_filter=range_filter,
     )

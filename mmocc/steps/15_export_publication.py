@@ -8,7 +8,8 @@
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
-"""Export codebase and test-only cache artifacts for publication."""
+"""Export codebase and test-only cache artifacts for publication.
+Exports satellite remote sensing features instead of camera trap image features."""
 
 import fnmatch
 import json
@@ -24,7 +25,6 @@ import pandas as pd
 
 from mmocc.config import (
     cache_path,
-    default_image_backbone,
     default_sat_backbone,
     wildlife_insights_test_project_ids,
 )
@@ -114,43 +114,6 @@ def build_test_mask(ids: np.ndarray) -> np.ndarray:
     return np.isin(project_ids, list(wildlife_insights_test_project_ids))
 
 
-def export_image_features(
-    features_dir: Path, export_features_dir: Path, backbone: str
-) -> int:
-    prefix = f"wi_blank_image_features_{backbone}"
-    ids_path = features_dir / f"{prefix}_ids.npy"
-    if not ids_path.exists():
-        raise FileNotFoundError(
-            f"Missing image feature ids for backbone '{backbone}': {ids_path}"
-        )
-    ids = np.load(ids_path, allow_pickle=True)
-    mask = build_test_mask(ids)
-    if not mask.any():
-        raise ValueError(f"No test entries found for backbone '{backbone}'.")
-
-    sources = {
-        f"{prefix}.npy": features_dir / f"{prefix}.npy",
-        f"{prefix}_ids.npy": None,
-        f"{prefix}_locs.npy": features_dir / f"{prefix}_locs.npy",
-        f"{prefix}_covariates.npy": features_dir / f"{prefix}_covariates.npy",
-    }
-
-    for name, src in sources.items():
-        if src is None:
-            data = ids
-        else:
-            if not src.exists():
-                raise FileNotFoundError(f"Missing required feature file: {src}")
-            data = np.load(src, allow_pickle=True, mmap_mode="r")
-        if data.shape[0] != mask.shape[0]:
-            raise ValueError(
-                f"Feature length mismatch for {name}: {data.shape[0]} vs {mask.shape[0]}"
-            )
-        np.save(export_features_dir / name, data[mask])
-
-    return int(mask.sum())
-
-
 def export_sat_features(
     features_dir: Path, export_features_dir: Path, backbone: str
 ) -> int:
@@ -168,6 +131,8 @@ def export_sat_features(
     sources = {
         f"{prefix}.npy": features_dir / f"{prefix}.npy",
         f"{prefix}_ids.npy": None,
+        f"{prefix}_locs.npy": features_dir / f"{prefix}_locs.npy",
+        f"{prefix}_covariates.npy": features_dir / f"{prefix}_covariates.npy",
     }
 
     for name, src in sources.items():
@@ -175,7 +140,8 @@ def export_sat_features(
             data = ids
         else:
             if not src.exists():
-                raise FileNotFoundError(f"Missing required feature file: {src}")
+                LOGGER.warning("Optional feature file not found: %s", src)
+                continue
             data = np.load(src, allow_pickle=True, mmap_mode="r")
         if data.shape[0] != mask.shape[0]:
             raise ValueError(
@@ -196,27 +162,20 @@ def export_fit_results(fit_results: Iterable[Path], export_cache_dir: Path) -> i
     return count
 
 
-def collect_backbones(fit_results: Iterable[Path]) -> tuple[set[str], set[str]]:
-    image_backbones: set[str] = set()
+def collect_backbones(fit_results: Iterable[Path]) -> set[str]:
     sat_backbones: set[str] = set()
     for path in fit_results:
         try:
-            _, modalities, image_bb, sat_bb = filename_to_experiment(path.name)
+            _, modalities, _, sat_bb = filename_to_experiment(path.name)
         except ValueError:
             LOGGER.warning("Skipping unexpected fit results filename: %s", path.name)
             continue
-        if "image" in modalities or "covariates" in modalities:
-            backbone = (
-                default_image_backbone if image_bb in {"None", "none", ""} else image_bb
-            )
-            if not "expert" in backbone and not "visdiff" in backbone:
-                image_backbones.add(backbone)
         if "sat" in modalities:
             backbone = (
                 default_sat_backbone if sat_bb in {"None", "none", ""} else sat_bb
             )
             sat_backbones.add(backbone)
-    return image_backbones, sat_backbones
+    return sat_backbones
 
 
 def parse_csv_list(value: str | None) -> list[str] | None:
@@ -228,7 +187,6 @@ def parse_csv_list(value: str | None) -> list[str] | None:
 
 def filter_fit_results(
     fit_results_dir: Path,
-    image_backbones: list[str] | None,
     sat_backbones: list[str] | None,
     taxon_ids: list[str] | None,
 ) -> list[Path]:
@@ -238,18 +196,12 @@ def filter_fit_results(
     selected: list[Path] = []
     for path in fit_results_dir.glob("*.pkl"):
         try:
-            taxon_id, modalities, image_bb, sat_bb = filename_to_experiment(path.name)
+            taxon_id, modalities, _, sat_bb = filename_to_experiment(path.name)
         except ValueError:
             LOGGER.warning("Skipping unexpected fit results filename: %s", path.name)
             continue
         if taxon_ids is not None and taxon_id not in taxon_ids:
             continue
-        if "image" in modalities:
-            image_name = (
-                default_image_backbone if image_bb in {"None", "none", ""} else image_bb
-            )
-            if image_backbones is not None and image_name not in image_backbones:
-                continue
         if "sat" in modalities:
             sat_name = (
                 default_sat_backbone if sat_bb in {"None", "none", ""} else sat_bb
@@ -258,21 +210,7 @@ def filter_fit_results(
                 continue
         selected.append(path)
     return selected
-
-
-def export_blank_images(export_cache_dir: Path) -> int:
-    blank_images_path = cache_path / "wi_blank_images.pkl"
-    if not blank_images_path.exists():
-        LOGGER.warning("Missing blank image cache: %s", blank_images_path)
-        return 0
-    df = pd.read_pickle(blank_images_path)
-    if "loc_id" not in df.columns:
-        raise KeyError("wi_blank_images.pkl is missing the 'loc_id' column.")
-    project_ids = df["loc_id"].astype(str).str.split("___").str[0]
-    df_test = df.loc[project_ids.isin(wildlife_insights_test_project_ids)].copy()
-    output_path = export_cache_dir / "wi_blank_images.pkl"
-    df_test.to_pickle(output_path)
-    return len(df_test)
+    return selected
 
 
 def verify_exported_ids(export_features_dir: Path) -> None:
@@ -297,7 +235,6 @@ def write_summary(export_cache_dir: Path, summary: dict) -> None:
 def main(
     output_dir: str = ".export",
     overwrite: bool = False,
-    image_backbones: str | None = None,
     sat_backbones: str | None = None,
     taxon_ids: str | None = None,
 ) -> None:
@@ -323,42 +260,33 @@ def main(
     export_cache_dir.mkdir(parents=True, exist_ok=True)
 
     fit_results_dir = cache_path / "fit_results"
-    image_backbone_list = parse_csv_list(image_backbones)
     sat_backbone_list = parse_csv_list(sat_backbones)
     taxon_id_list = parse_csv_list(taxon_ids)
     selected_fit_results = filter_fit_results(
         fit_results_dir,
-        image_backbone_list,
         sat_backbone_list,
         taxon_id_list,
     )
     num_fit_results = export_fit_results(selected_fit_results, export_cache_dir)
-    image_backbones, sat_backbones = collect_backbones(selected_fit_results)
+    sat_backbones_set = collect_backbones(selected_fit_results)
 
     features_dir = cache_path / "features"
     export_features_dir = export_cache_dir / "features"
     export_features_dir.mkdir(parents=True, exist_ok=True)
 
     feature_counts: dict[str, int] = {}
-    for backbone in sorted(image_backbones):
-        feature_counts[f"image_{backbone}"] = export_image_features(
-            features_dir, export_features_dir, backbone
-        )
-    for backbone in sorted(sat_backbones):
+    for backbone in sorted(sat_backbones_set):
         feature_counts[f"sat_{backbone}"] = export_sat_features(
             features_dir, export_features_dir, backbone
         )
 
-    num_blank_images = export_blank_images(export_cache_dir)
     verify_exported_ids(export_features_dir)
 
     summary = dict(
         output=str(output_path),
         repo_files_copied=num_files,
         fit_results_copied=num_fit_results,
-        blank_images_exported=num_blank_images,
-        image_backbones=sorted(image_backbones),
-        sat_backbones=sorted(sat_backbones),
+        sat_backbones=sorted(sat_backbones_set),
         taxon_ids=taxon_id_list,
         feature_counts=feature_counts,
         test_project_ids=sorted(wildlife_insights_test_project_ids),

@@ -11,7 +11,7 @@
 # pyvisdiff = { git = "https://github.com/timmh/pyvisdiff.git" }
 # ///
 """Run VisDiff to describe what makes environments where a species is present different
-from where it is absent."""
+from where it is absent, using remote sensing satellite imagery."""
 
 import logging
 import math
@@ -34,9 +34,9 @@ from mmocc.config import (
 from mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
-    load_image_lookup,
+    load_sat_lookup,
     resolve_fit_results_path,
-    select_image_groups,
+    select_sat_groups,
 )
 from mmocc.utils import (
     experiment_to_filename,
@@ -46,7 +46,7 @@ from mmocc.utils import (
 )
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_MODALITY = "image,sat,covariates"
+DEFAULT_MODALITY = "sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
@@ -151,9 +151,9 @@ def normalize_modalities_arg(value: Sequence[str] | str | None) -> List[List[str
     modality_specs = _ensure_list(value, [DEFAULT_MODALITY])
     modalities = [parse_modalities(spec) for spec in modality_specs]
     for spec in modalities:
-        if "image" not in spec:
+        if "sat" not in spec:
             raise ValueError(
-                "Each modality set must include the 'image' modality for VisDiff."
+                "Each modality set must include the 'sat' modality for VisDiff."
             )
     return modalities
 
@@ -248,18 +248,18 @@ def build_visdiff_rows(
 
 
 def aggregate_visdiff_rows(rows: Sequence[Dict[str, str | float]]) -> pd.DataFrame:
-    minimum_columns = ["taxon_id", "species", "difference", "score"]
+    minimum_columns = ["taxon_id", "species", "difference", "auroc"]
     if not rows:
         return pd.DataFrame(columns=minimum_columns)
     df = pd.DataFrame(rows)
     missing = [col for col in minimum_columns if col not in df.columns]
     if missing:
         raise KeyError(f"Missing columns in VisDiff rows: {missing}")
-    df["score"] = pd.to_numeric(df["score"], errors="coerce")
-    df = df.sort_values("score", ascending=False).drop_duplicates(
+    df["auroc"] = pd.to_numeric(df["auroc"], errors="coerce")
+    df = df.sort_values("auroc", ascending=False).drop_duplicates(
         subset=["taxon_id", "species", "difference"]
     )
-    df = df.sort_values(["taxon_id", "score"], ascending=[True, False]).reset_index(
+    df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False]).reset_index(
         drop=True
     )
     return df
@@ -313,29 +313,29 @@ def run_pyvisdiff(
     cache_dir: Optional[str | Path] = cache_path / "visdiff_cache",
 ) -> Dict:
     captioner_prompt = (
-        "Describe this camera trap image in detail. Do not mention any persons or animals, "
-        "focus exclusively on the environment."
+        "Describe this satellite imagery in detail. Focus on land cover, vegetation, "
+        "terrain features, and environmental characteristics visible from above."
     )
     proposer_prompt = """
-        The following are the result of captioning two groups of images:
+        The following are the result of captioning two groups of satellite images:
 
         {text}
 
         I am a machine learning researcher trying to figure out the major differences between these two groups so I can better understand my data.
 
         Come up with 10 distinct concepts that are more likely to be true for Group A compared to Group B. Please write a list of captions (separated by bullet points "*"). For example:
-        * "a car in the rain"
-        * "low quality"
-        * "cars from a side view"
-        * "a joyful atmosphere"
+        * "dense forest cover"
+        * "agricultural fields"
+        * "mountainous terrain"
+        * "water bodies present"
 
-        Ignore any references to humans or animals, and focus on the environment. Do not talk about the caption, e.g., "caption with one word" and do not list more than one concept. The hypothesis should be a caption, so hypotheses like "more of ...", "presence of ...", "images with ..." are incorrect. Also do not enumerate possibilities within parentheses. Here are examples of bad outputs and their corrections:
-        * INCORRECT: "a person strolling around in a mall" CORRECTED: "mall"
-        * INCORRECT: "various city environments like buildings, parks, and streets" CORRECTED: "city environments"
-        * INCORRECT: "images of household object (e.g. bowl, vaccuum, lamp)" CORRECTED: "household objects"
-        * INCORRECT: "Different types of vehicles including cars, trucks, boats, and RVs" CORRECTED: "vehicles"
+        Focus on landscape, vegetation, terrain, and environmental features visible in satellite imagery. Do not talk about the caption, e.g., "caption with one word" and do not list more than one concept. The hypothesis should be a caption, so hypotheses like "more of ...", "presence of ...", "images with ..." are incorrect. Also do not enumerate possibilities within parentheses. Here are examples of bad outputs and their corrections:
+        * INCORRECT: "various landscapes including forests, fields, and rivers" CORRECTED: "mixed landscapes"
+        * INCORRECT: "presence of water bodies" CORRECTED: "water bodies"
+        * INCORRECT: "images showing urban development" CORRECTED: "urban areas"
+        * INCORRECT: "Different types of vegetation including trees, shrubs, and grass" CORRECTED: "diverse vegetation"
 
-        Again, I want to figure out what kind of distribution shift are there. List properties that hold more often for the images (not captions) in group A compared to group B. Answer with a list (separated by bullet points "*"). Your response:
+        Again, I want to figure out what kind of distribution shift are there. List properties that hold more often for the satellite images (not captions) in group A compared to group B. Answer with a list (separated by bullet points "*"). Your response:
     """
 
     pyvisdiff_run = _load_pyvisdiff_entrypoint()
@@ -380,7 +380,7 @@ def run_species_visdiff_job(
     logger = logging.getLogger(__name__)
     taxon_map = get_taxon_map()
     species_name = taxon_map.get(taxon_id, taxon_id)
-    image_lookup = load_image_lookup()
+    sat_lookup = load_sat_lookup()
 
     try:
         (
@@ -412,17 +412,17 @@ def run_species_visdiff_job(
         resolved_sat_backbone,
         fit_results,
     )
-    site_scores = site_scores.join(image_lookup, on="loc_id", how="left")
-    site_scores["image_exists"] = site_scores["image_exists"].fillna(False).astype(bool)
+    site_scores = site_scores.join(sat_lookup, on="loc_id", how="left")
+    site_scores["sat_exists"] = site_scores["sat_exists"].fillna(False).astype(bool)
 
-    available_images = int(
-        (site_scores["image_exists"] & site_scores["is_train"]).sum()
+    available_sat = int(
+        (site_scores["sat_exists"] & site_scores["is_train"]).sum()
     )
 
     collected_rows: List[Dict[str, str | float]] = []
 
     for mode in modes:
-        positives, negatives = select_image_groups(
+        positives, negatives = select_sat_groups(
             site_scores,
             resolved_modalities,
             mode,
@@ -432,11 +432,11 @@ def run_species_visdiff_job(
         )
         if not positives or not negatives:
             logger.warning(
-                "Insufficient image coverage for %s (%s mode). Need %d valid images but only found %d.",
+                "Insufficient satellite imagery for %s (%s mode). Need %d valid images but only found %d.",
                 species_name,
                 mode,
                 top_k,
-                available_images,
+                available_sat,
             )
             continue
 
