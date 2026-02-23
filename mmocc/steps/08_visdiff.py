@@ -50,7 +50,7 @@ DEFAULT_MODALITY = "sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
-VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_descriptions.csv"
+VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_descriptions.csv"
 DEFAULT_HYPOTHESES_LIMIT = None
 
 

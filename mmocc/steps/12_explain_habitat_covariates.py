@@ -41,7 +41,7 @@ CLIP_SAT_BACKBONE = "clip_vitbigg14"
 OUTPUT_DIR = cache_path / "habitat_explainability"
 
 DESCRIPTOR_FILES: dict[str, Path] = {
-    "visdiff_clip": cache_path / "visdiff_descriptions.csv",
+    "visdiff_clip": cache_path / "visdiff_sat_descriptions.csv",
     "expert_clip": cache_path / "expert_habitat_descriptions.csv",
 }
 

@@ -46,7 +46,7 @@ from mmocc.utils import (
 GRAFT_SAT_BACKBONE = "graft"
 
 DESCRIPTOR_FILES: dict[str, Path] = {
-    "visdiff": cache_path / "visdiff_descriptions.csv",
+    "visdiff": cache_path / "visdiff_sat_descriptions.csv",
     "expert": cache_path / "expert_habitat_descriptions.csv",
 }
 
