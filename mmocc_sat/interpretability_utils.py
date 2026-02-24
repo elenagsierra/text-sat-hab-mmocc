@@ -6,7 +6,12 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from mmocc_sat.config import cache_path, wi_image_path
+from mmocc_sat.config import (
+    cache_path,
+    default_image_backbone,
+    default_sat_backbone,
+    wi_image_path,
+)
 from mmocc_sat.utils import (
     experiment_to_filename,
     filename_to_experiment,
@@ -16,6 +21,14 @@ from mmocc_sat.utils import (
 LOGGER = logging.getLogger(__name__)
 FIT_RESULTS_DIR = cache_path / "fit_results"
 FEATURES_DIR = cache_path / "features"
+
+
+def _normalize_backbone_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "none"}:
+        return None
+    return value
 
 
 def load_image_lookup() -> pd.DataFrame:
@@ -40,15 +53,27 @@ def resolve_fit_results_path(
     image_backbone: str | None,
     sat_backbone: str | None,
 ) -> Tuple[Path, List[str], str | None, str | None]:
+    requested_modalities = set(modalities)
+    requested_image_backbone = _normalize_backbone_name(image_backbone)
+    requested_sat_backbone = _normalize_backbone_name(sat_backbone)
     filename = experiment_to_filename(
-        taxon_id, set(modalities), image_backbone, sat_backbone, "pkl"
+        taxon_id,
+        requested_modalities,
+        requested_image_backbone,
+        requested_sat_backbone,
+        "pkl",
     )
     root = FIT_RESULTS_DIR
     if not root.exists():
         raise FileNotFoundError(f"Fit results directory does not exist: {root}")
     candidate = root / filename
     if candidate.exists():
-        return candidate, list(modalities), image_backbone, sat_backbone
+        return (
+            candidate,
+            sorted(list(requested_modalities)),
+            requested_image_backbone,
+            requested_sat_backbone,
+        )
 
     available: List[Path] = sorted(root.glob(f"{taxon_id}_modalities_*.pkl"))
     if not available:
@@ -56,20 +81,53 @@ def resolve_fit_results_path(
             f"No fit results found for taxon_id={taxon_id}. Looked for {filename} in {FIT_RESULTS_DIR}."
         )
 
-    fallback = available[0]
-    fallback_taxon, fallback_modalities, fallback_image, fallback_sat = (
-        filename_to_experiment(fallback.name)
-    )
-    if fallback_taxon != taxon_id:
-        raise ValueError(
-            f"Fallback results taxon mismatch for {taxon_id}: {fallback.name}"
+    parsed: List[Tuple[Path, set[str], str | None, str | None]] = []
+    for path in available:
+        fallback_taxon, fallback_modalities, fallback_image, fallback_sat = (
+            filename_to_experiment(path.name)
         )
+        if fallback_taxon != taxon_id:
+            continue
+        parsed.append(
+            (
+                path,
+                set(fallback_modalities),
+                _normalize_backbone_name(fallback_image),
+                _normalize_backbone_name(fallback_sat),
+            )
+        )
+    if not parsed:
+        raise FileNotFoundError(
+            f"No parseable fit results for taxon_id={taxon_id} in {FIT_RESULTS_DIR}."
+        )
+
+    # Prefer experiments that best match requested modalities/backbones.
+    def score(entry: Tuple[Path, set[str], str | None, str | None]) -> int:
+        _, mods, img_bb, sat_bb = entry
+        s = 0
+        if requested_modalities.issubset(mods):
+            s += 100
+        else:
+            s += 10 * len(requested_modalities & mods)
+        if "sat" in requested_modalities and "sat" in mods:
+            s += 20
+        if "image" in requested_modalities and "image" in mods:
+            s += 10
+        if requested_image_backbone is not None and img_bb == requested_image_backbone:
+            s += 3
+        if requested_sat_backbone is not None and sat_bb == requested_sat_backbone:
+            s += 3
+        return s
+
+    fallback, fallback_modalities, fallback_image, fallback_sat = max(
+        parsed, key=score
+    )
     LOGGER.warning(
         "Requested experiment '%s' not found. Using fallback results '%s' which were trained with modalities=%s, "
         "image_backbone=%s, sat_backbone=%s.",
         filename,
         fallback.name,
-        sorted(fallback_modalities),
+        sorted(list(fallback_modalities)),
         fallback_image,
         fallback_sat,
     )
@@ -81,15 +139,22 @@ def load_fit_results(path: Path) -> Dict:
         return pickle.load(handle)
 
 
-def load_location_ids(image_backbone: str | None) -> np.ndarray:
-    if image_backbone is None:
-        raise ValueError(
-            "Image backbone must be defined to recover location identifiers."
-        )
-    ids_path = FEATURES_DIR / f"wi_blank_image_features_{image_backbone}_ids.npy"
-    if not ids_path.exists():
-        raise FileNotFoundError(f"Missing location id file at {ids_path}.")
-    return np.load(ids_path, allow_pickle=True)
+def load_location_ids(
+    image_backbone: str | None, sat_backbone: str | None
+) -> np.ndarray:
+    image_backbone = _normalize_backbone_name(image_backbone) or default_image_backbone
+    sat_backbone = _normalize_backbone_name(sat_backbone) or default_sat_backbone
+
+    image_ids_path = FEATURES_DIR / f"wi_blank_image_features_{image_backbone}_ids.npy"
+    sat_ids_path = FEATURES_DIR / f"wi_blank_sat_features_{sat_backbone}_ids.npy"
+
+    if image_ids_path.exists():
+        return np.load(image_ids_path, allow_pickle=True)
+    if sat_ids_path.exists():
+        return np.load(sat_ids_path, allow_pickle=True)
+    raise FileNotFoundError(
+        f"Missing location id files at {image_ids_path} and {sat_ids_path}."
+    )
 
 
 def compute_site_scores(
@@ -99,6 +164,9 @@ def compute_site_scores(
     sat_backbone: str | None,
     fit_results: Dict,
 ) -> Tuple[pd.DataFrame, str]:
+    image_backbone = _normalize_backbone_name(image_backbone)
+    sat_backbone = _normalize_backbone_name(sat_backbone)
+
     (
         _,
         _,
@@ -118,7 +186,7 @@ def compute_site_scores(
         features_modalities,
     ) = load_data(taxon_id, set(modalities), image_backbone, sat_backbone)
 
-    ids_all = load_location_ids(image_backbone)
+    ids_all = load_location_ids(image_backbone, sat_backbone)
     mask_train = np.asarray(mask_train, dtype=bool)
     mask_test = np.asarray(mask_test, dtype=bool)
     valid_mask = mask_train | mask_test

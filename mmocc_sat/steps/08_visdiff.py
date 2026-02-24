@@ -394,6 +394,15 @@ def run_species_visdiff_job(
         logger.warning("Skipping %s (%s): %s", taxon_id, species_name, exc)
         return
 
+    if "sat" not in set(resolved_modalities):
+        logger.warning(
+            "Skipping %s (%s): selected fit results do not include 'sat' modality (%s).",
+            taxon_id,
+            species_name,
+            resolved_modalities,
+        )
+        return
+
     try:
         display_path = fit_path.relative_to(cache_path)
     except ValueError:
