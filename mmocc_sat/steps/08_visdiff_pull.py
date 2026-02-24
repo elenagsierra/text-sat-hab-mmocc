@@ -35,6 +35,7 @@ from PIL import Image
 from mmocc_sat.config import cache_path
 from mmocc_sat.rs_graft import (
     DEFAULT_CLOUD_PERCENT,
+    DEFAULT_EE_PROJECT,
     DEFAULT_TIME_WINDOW_DAYS,
     SENTINEL_IMAGE_SIZE,
     SENTINEL_PIXEL_SIZE_METERS,
@@ -65,7 +66,7 @@ def _to_iso_timestamp(value) -> str:
 def pull_sat_images(
     max_sites: int | None = None,
     skip_existing: bool = True,
-    project: str | None = os.getenv("EE_PROJECT"),
+    project: str | None = os.getenv("EE_PROJECT", DEFAULT_EE_PROJECT),
     window_days: int = DEFAULT_TIME_WINDOW_DAYS,
     cloud_percent: float = DEFAULT_CLOUD_PERCENT,
     image_size: int = SENTINEL_IMAGE_SIZE,
@@ -142,7 +143,7 @@ def main(
     output_file: str | Path = cache_path / "visdiff_sat_descriptions.csv",
     pull_max_sites: int | None = None,
     pull_skip_existing: bool = True,
-    pull_project: str | None = os.getenv("EE_PROJECT"),
+    pull_project: str | None = os.getenv("EE_PROJECT", DEFAULT_EE_PROJECT),
     pull_window_days: int = DEFAULT_TIME_WINDOW_DAYS,
     pull_cloud_percent: float = DEFAULT_CLOUD_PERCENT,
     pull_image_size: int = SENTINEL_IMAGE_SIZE,

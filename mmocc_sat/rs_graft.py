@@ -23,6 +23,7 @@ DEFAULT_EE_PROJECT = "multimodal-sdm-473820"
 
 _MEMORY = Memory(cache_path / "joblib_graft", verbose=0)
 _EE_PROJECT: str | None = None
+_EE_INITIALIZED = False
 
 
 @dataclass(frozen=True)
@@ -47,14 +48,17 @@ def _parse_date(value: str) -> date:
 def initialize_ee(project: str | None = DEFAULT_EE_PROJECT) -> None:
     """Initialize Earth Engine, optionally with a project."""
 
-    global _EE_PROJECT
-    if _EE_PROJECT == project:
+    global _EE_PROJECT, _EE_INITIALIZED
+    if project is None:
+        project = DEFAULT_EE_PROJECT
+    if _EE_INITIALIZED and _EE_PROJECT == project:
         return
     if project:
         ee.Initialize(project=project)
     else:
         ee.Initialize()
     _EE_PROJECT = project
+    _EE_INITIALIZED = True
 
 
 def _mask_s2_sr(image: ee.Image) -> ee.Image:  # type: ignore[type-arg]
@@ -125,7 +129,7 @@ def fetch_sentinel_patch(
 ) -> np.ndarray | None:
     """Fetch a Sentinel-2 RGB patch centered at the given point."""
 
-    initialize_ee(project=project)
+    initialize_ee(project=project or DEFAULT_EE_PROJECT)
     target_date = _parse_date(timestamp)
     start = target_date - timedelta(days=window_days)
     end = target_date + timedelta(days=window_days)
