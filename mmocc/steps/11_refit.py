@@ -126,17 +126,13 @@ def select_descriptors(
     subset = subset[subset["difference"] != ""]
     if subset.empty:
         return [], np.empty((0,), dtype=np.float32)
-    if "score" in subset.columns:
-        subset["score"] = pd.to_numeric(subset["score"], errors="coerce")
-    else:
-        subset["score"] = 1.0
     subset = subset.dropna(subset=["difference"])
-    subset = subset.sort_values("score", ascending=False)
+    subset = subset.sort_values("auroc", ascending=False)
     subset = subset.drop_duplicates(subset="difference")
     if limit is not None:
         subset = subset.head(limit)
     texts = subset["difference"].tolist()
-    scores = subset["score"].fillna(1.0).astype(float).to_numpy()
+    scores = subset["auroc"].fillna(0.0).astype(float).to_numpy()
     if len(scores) == 0:
         scores = np.ones(len(texts), dtype=np.float32)
     return texts, scores.astype(np.float32)

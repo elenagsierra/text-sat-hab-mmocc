@@ -84,10 +84,9 @@ def _clean_descriptors(df: pd.DataFrame, limit: int) -> pd.DataFrame:
     df = df.copy()
     df["taxon_id"] = df["taxon_id"].astype(str)
     df["difference"] = df["difference"].astype(str).str.strip()
-    df["score"] = pd.to_numeric(df.get("score", 1.0), errors="coerce")
-    df = df.dropna(subset=["taxon_id", "difference", "score"])
+    df = df.dropna(subset=["taxon_id", "difference", "auroc"])
     df = df[df["difference"] != ""]
-    df = df.sort_values(["taxon_id", "score"], ascending=[True, False])
+    df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False])
     df = df.drop_duplicates(subset=["taxon_id", "difference"])
     df = df.groupby("taxon_id").head(limit)
     return df.reset_index(drop=True)
@@ -117,7 +116,7 @@ def load_descriptors(
                     species_name=name,
                     source=source,
                     description=str(row["difference"]),
-                    score=float(row["score"]),
+                    score=float(row["auroc"]),
                 )
             )
     if not rows:

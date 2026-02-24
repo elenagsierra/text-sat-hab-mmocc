@@ -248,18 +248,18 @@ def build_visdiff_rows(
 
 
 def aggregate_visdiff_rows(rows: Sequence[Dict[str, str | float]]) -> pd.DataFrame:
-    minimum_columns = ["taxon_id", "species", "difference", "score"]
+    minimum_columns = ["taxon_id", "species", "difference", "auroc"]
     if not rows:
         return pd.DataFrame(columns=minimum_columns)
     df = pd.DataFrame(rows)
     missing = [col for col in minimum_columns if col not in df.columns]
     if missing:
         raise KeyError(f"Missing columns in VisDiff rows: {missing}")
-    df["score"] = pd.to_numeric(df["score"], errors="coerce")
-    df = df.sort_values("score", ascending=False).drop_duplicates(
+    df["auroc"] = pd.to_numeric(df["auroc"], errors="coerce")
+    df = df.sort_values("auroc", ascending=False).drop_duplicates(
         subset=["taxon_id", "species", "difference"]
     )
-    df = df.sort_values(["taxon_id", "score"], ascending=[True, False]).reset_index(
+    df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False]).reset_index(
         drop=True
     )
     return df

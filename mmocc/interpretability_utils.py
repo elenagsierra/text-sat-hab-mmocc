@@ -89,7 +89,7 @@ def load_location_ids(image_backbone: str | None) -> np.ndarray:
     ids_path = FEATURES_DIR / f"wi_blank_image_features_{image_backbone}_ids.npy"
     if not ids_path.exists():
         raise FileNotFoundError(f"Missing location id file at {ids_path}.")
-    return np.load(ids_path)
+    return np.load(ids_path, allow_pickle=True)
 
 
 def compute_site_scores(

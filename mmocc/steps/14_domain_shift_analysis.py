@@ -155,16 +155,19 @@ def _prepare_base_data(
 
     feature_path = cache_path / "features"
     ids_all = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}_ids.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone}_ids.npy",
+        allow_pickle=True,
     )
     image_features = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone}.npy",
+        allow_pickle=True,
     )
-    sat_features = np.load(feature_path / f"wi_blank_sat_features_{sat_backbone}.npy")
+    sat_features = np.load(feature_path / f"wi_blank_sat_features_{sat_backbone}.npy", allow_pickle=True)
     covariates = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}_covariates.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone}_covariates.npy",
+        allow_pickle=True,
     )
-    locs = np.load(feature_path / f"wi_blank_image_features_{image_backbone}_locs.npy")
+    locs = np.load(feature_path / f"wi_blank_image_features_{image_backbone}_locs.npy", allow_pickle=True)
 
     latitudes_all = locs[:, 0]
     longitudes_all = locs[:, 1]

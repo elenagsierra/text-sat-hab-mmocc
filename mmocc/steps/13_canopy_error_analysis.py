@@ -124,17 +124,13 @@ def select_descriptors(
     subset = subset[subset["difference"] != ""]
     if subset.empty:
         return [], np.empty((0,), dtype=np.float32)
-    if "score" in subset.columns:
-        subset["score"] = pd.to_numeric(subset["score"], errors="coerce")
-    else:
-        subset["score"] = 1.0
-    subset = subset.dropna(subset=["score"])
-    subset = subset.sort_values("score", ascending=False)
+    subset = subset.dropna(subset=["auroc"])
+    subset = subset.sort_values("auroc", ascending=False)
     subset = subset.drop_duplicates(subset="difference")
     if limit is not None:
         subset = subset.head(limit)
     texts = subset["difference"].tolist()
-    scores = subset["score"].fillna(1.0).astype(float).to_numpy()
+    scores = subset["auroc"].fillna(0.0).astype(float).to_numpy()
     if len(scores) == 0:
         scores = np.ones(len(texts), dtype=np.float32)
     return texts, scores.astype(np.float32)
@@ -274,9 +270,10 @@ def evaluate_species(
 
     feature_path = cache_path / "features"
     ids_all = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone}_ids.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone}_ids.npy",
+        allow_pickle=True,
     )
-    locs = np.load(feature_path / f"wi_blank_image_features_{image_backbone}_locs.npy")
+    locs = np.load(feature_path / f"wi_blank_image_features_{image_backbone}_locs.npy", allow_pickle=True)
     loc_ids = ids_all[mask_test]
     locs = locs[mask_test]
     latitudes = locs[:, 0]

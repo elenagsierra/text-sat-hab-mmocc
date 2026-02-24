@@ -342,26 +342,33 @@ def load_data(
     )
     feature_path = cache_path / "features"
     ids_all = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone_name_data}_ids.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone_name_data}_ids.npy",
+        allow_pickle=True,
     )
     image_features = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone_name_data}.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone_name_data}.npy",
+        allow_pickle=True,
     )
     sat_features = np.load(
-        feature_path / f"wi_blank_sat_features_{sat_backbone_name_data}.npy"
+        feature_path / f"wi_blank_sat_features_{sat_backbone_name_data}.npy",
+        allow_pickle=True,
     )
     image_loc_ids = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone_name_data}_ids.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone_name_data}_ids.npy",
+        allow_pickle=True,
     )
     sat_loc_ids = np.load(
-        feature_path / f"wi_blank_sat_features_{sat_backbone_name_data}_ids.npy"
+        feature_path / f"wi_blank_sat_features_{sat_backbone_name_data}_ids.npy",
+        allow_pickle=True,
     )
     locs = np.load(
-        feature_path / f"wi_blank_image_features_{image_backbone_name_data}_locs.npy"
+        feature_path / f"wi_blank_image_features_{image_backbone_name_data}_locs.npy",
+        allow_pickle=True,
     )
     covariates = np.load(
         feature_path
-        / f"wi_blank_image_features_{image_backbone_name_data}_covariates.npy"
+        / f"wi_blank_image_features_{image_backbone_name_data}_covariates.npy",
+        allow_pickle=True,
     )
     assert (
         len(image_loc_ids) == image_features.shape[0]
