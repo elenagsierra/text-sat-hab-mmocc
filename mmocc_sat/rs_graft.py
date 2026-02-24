@@ -19,6 +19,7 @@ SENTINEL_PIXEL_SIZE_METERS = 10.0
 SENTINEL_IMAGE_SIZE = 224
 DEFAULT_CLOUD_PERCENT = 20.0
 DEFAULT_TIME_WINDOW_DAYS = 60
+DEFAULT_EE_PROJECT = "multimodal-sdm-473820"
 
 _MEMORY = Memory(cache_path / "joblib_graft", verbose=0)
 _EE_PROJECT: str | None = None
@@ -43,7 +44,7 @@ def _parse_date(value: str) -> date:
     return datetime.fromisoformat(value).date()
 
 
-def initialize_ee(project: str | None = None) -> None:
+def initialize_ee(project: str | None = DEFAULT_EE_PROJECT) -> None:
     """Initialize Earth Engine, optionally with a project."""
 
     global _EE_PROJECT
@@ -119,7 +120,7 @@ def fetch_sentinel_patch(
     size: int = SENTINEL_IMAGE_SIZE,
     pixel_size_meters: float = SENTINEL_PIXEL_SIZE_METERS,
     cloud_percent: float = DEFAULT_CLOUD_PERCENT,
-    project: str | None = None,
+    project: str | None = DEFAULT_EE_PROJECT,
     dataset: str = SENTINEL_DATASET,
 ) -> np.ndarray | None:
     """Fetch a Sentinel-2 RGB patch centered at the given point."""
