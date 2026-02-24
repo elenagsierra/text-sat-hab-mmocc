@@ -4,14 +4,13 @@
 # dependencies = [
 #     "mmocc",
 #     "open-clip-torch==3.2.0",
-#     "setuptools",
 # ]
 #
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
 """Refit occupancy models using CLIP similarity scores derived from VisDiff and expert
-habitat descriptions, applied to satellite imagery embeddings."""
+habitat descriptions."""
 
 import os
 import pickle
@@ -48,10 +47,10 @@ from mmocc.utils import (
 
 CLIP_MODEL_NAME = "ViT-bigG-14"
 CLIP_PRETRAINED = "laion2b_s39b_b160k"
-CLIP_SAT_BACKBONE = "clip_vitbigg14"
+CLIP_IMAGE_BACKBONE = "clip_vitbigg14"
 
 DESCRIPTOR_FILES: dict[str, Path] = {
-    "visdiff_clip": cache_path / "visdiff_sat_descriptions.csv",
+    "visdiff_clip": cache_path / "visdiff_descriptions.csv",
     "expert_clip": cache_path / "expert_habitat_descriptions.csv",
 }
 
@@ -127,13 +126,17 @@ def select_descriptors(
     subset = subset[subset["difference"] != ""]
     if subset.empty:
         return [], np.empty((0,), dtype=np.float32)
+    if "score" in subset.columns:
+        subset["score"] = pd.to_numeric(subset["score"], errors="coerce")
+    else:
+        subset["score"] = 1.0
     subset = subset.dropna(subset=["difference"])
-    subset = subset.sort_values("auroc", ascending=False)
+    subset = subset.sort_values("score", ascending=False)
     subset = subset.drop_duplicates(subset="difference")
     if limit is not None:
         subset = subset.head(limit)
     texts = subset["difference"].tolist()
-    scores = subset["auroc"].fillna(0.0).astype(float).to_numpy()
+    scores = subset["score"].fillna(1.0).astype(float).to_numpy()
     if len(scores) == 0:
         scores = np.ones(len(texts), dtype=np.float32)
     return texts, scores.astype(np.float32)
@@ -169,8 +172,8 @@ def fit(
     sat_backbone_name: str | None,
 ):
     modalities_list = sorted(list(modalities))
-    if "sat" not in modalities_list:
-        raise ValueError("Descriptor-based refits require the 'sat' modality.")
+    if "image" not in modalities_list:
+        raise ValueError("Descriptor-based refits require the 'image' modality.")
 
     (
         _,
@@ -189,7 +192,7 @@ def fit(
         y_train_naive,
         y_test_naive,
         features_modalities,
-    ) = load_data(taxon_id, modalities, None, sat_backbone_name)
+    ) = load_data(taxon_id, modalities, CLIP_IMAGE_BACKBONE, sat_backbone_name)
 
     descriptor_texts, descriptor_scores = select_descriptors(
         descriptor_backbone, taxon_id, descriptor_settings.max_entries
@@ -201,9 +204,9 @@ def fit(
 
     descriptor_embeddings = get_text_encoder().encode(descriptor_texts)
     similarity_features = compute_similarity_features(
-        features_modalities["sat"], descriptor_embeddings, descriptor_scores
+        features_modalities["image"], descriptor_embeddings, descriptor_scores
     )
-    features_modalities["sat"] = similarity_features
+    features_modalities["image"] = similarity_features
 
     naive_detection_prob_train = (
         np.mean(np.nanmean(y_train, axis=1)[y_train_naive])
@@ -267,8 +270,8 @@ def fit(
         scientific_name=scientific_name,
         common_name=common_name,
         modalities=modalities_list,
+        image_backbone=descriptor_backbone,
         sat_backbone=sat_backbone_name,
-        descriptor_backbone=descriptor_backbone,
         limit_to_range=limit_to_range,
         modalities_scaler=modalities_scaler,
         modalities_pca=modalities_pca,
@@ -353,15 +356,15 @@ def main(
     skip_existing: bool = True,
     visdiff_limit: int | None = num_habitat_descriptions,
     expert_limit: int | None = num_habitat_descriptions,
-    descriptor_backbones: Sequence[str] | str | None = None,
+    image_backbones: Sequence[str] | str | None = None,
 ):
     descriptor_settings = {
         "visdiff_clip": DescriptorSettings(max_entries=visdiff_limit),
         "expert_clip": DescriptorSettings(max_entries=expert_limit),
     }
-    requested_backbones = parse_backbones(descriptor_backbones)
+    requested_backbones = parse_backbones(image_backbones)
 
-    modalities_subsets = [set(sorted(["sat", "covariates"]))]
+    modalities_subsets = [set(sorted(["image", "sat", "covariates"]))]
 
     descriptor_species = {
         backbone: set(load_descriptor_table(backbone)["taxon_id"].unique().tolist())

@@ -28,7 +28,7 @@ CLIP_MODEL_NAME = "ViT-bigG-14"
 CLIP_PRETRAINED = "laion2b_s39b_b160k"
 
 DESCRIPTOR_PATHS: Dict[str, Path] = {
-    "VisDiff": cache_path / "visdiff_sat_descriptions.csv",
+    "VisDiff": cache_path / "visdiff_descriptions.csv",
     "Expert": cache_path / "expert_habitat_descriptions.csv",
 }
 

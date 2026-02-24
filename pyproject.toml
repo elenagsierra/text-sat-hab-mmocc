@@ -32,6 +32,7 @@ dependencies = [
     "rangepy @ git+https://github.com/timmh/rangepy.git",
     "requests==2.32.5",
     "scikit-learn==1.7.2",
+    "setuptools",
     "seaborn",
     "submitit==1.5.3",
     "torch",

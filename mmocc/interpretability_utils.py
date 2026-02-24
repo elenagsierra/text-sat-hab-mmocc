@@ -89,7 +89,7 @@ def load_location_ids(image_backbone: str | None) -> np.ndarray:
     ids_path = FEATURES_DIR / f"wi_blank_image_features_{image_backbone}_ids.npy"
     if not ids_path.exists():
         raise FileNotFoundError(f"Missing location id file at {ids_path}.")
-    return np.load(ids_path, allow_pickle=True)
+    return np.load(ids_path)
 
 
 def compute_site_scores(
@@ -221,80 +221,4 @@ def select_image_groups(
     return (
         positives["image_path"].tolist() if not positives.empty else [],
         negatives["image_path"].tolist() if not negatives.empty else [],
-    )
-
-
-def load_sat_lookup() -> pd.DataFrame:
-    """Load satellite imagery lookup table with paths and coordinates."""
-    df = pd.read_pickle(cache_path / "wi_blank_images.pkl")
-    if df.empty:
-        raise RuntimeError("No cached Wildlife Insights blank images found.")
-    df = df.sort_values("Date_Time")
-    # Build satellite image paths based on location IDs
-    df["sat_path"] = df["loc_id"].apply(
-        lambda loc_id: str(cache_path / "sat_images" / f"{loc_id}.png")
-    )
-    df["sat_exists"] = df["sat_path"].apply(lambda path: Path(path).exists())
-    return df.drop_duplicates(subset="loc_id").set_index("loc_id")[
-        ["sat_path", "sat_exists", "Latitude", "Longitude"]
-    ]
-
-
-def rank_sat_groups(
-    site_scores: pd.DataFrame,
-    modalities: Sequence[str],
-    mode: str,
-    unique_weight: float,
-    top_k: int,
-    sat_modality: str = "sat",
-    test: bool = False,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Rank sites by satellite modality scores."""
-    column = f"score_{sat_modality}"
-    if column not in site_scores.columns:
-        raise KeyError(
-            f"{column} not found in site scores. Available columns: {site_scores.columns.tolist()}"
-        )
-
-    subset_name = "is_test" if test else "is_train"
-    subset = site_scores[site_scores["sat_exists"] & site_scores[subset_name]].copy()
-    if subset.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    if mode == "unique":
-        other_columns = [
-            f"score_{mod}"
-            for mod in modalities
-            if mod != sat_modality and f"score_{mod}" in subset
-        ]
-        penalty = subset[other_columns].sum(axis=1) if other_columns else 0.0
-        subset["rank_score"] = subset[column] * unique_weight - penalty
-    else:
-        subset["rank_score"] = subset[column]
-
-    subset = subset.sort_values("rank_score", ascending=False)
-    limit = min(top_k, len(subset) // 2)
-    if limit <= 0:
-        return pd.DataFrame(), pd.DataFrame()
-    positives = subset.head(limit).copy()
-    negatives = subset.tail(limit).copy().sort_values("rank_score", ascending=True)
-    return positives.reset_index(drop=True), negatives.reset_index(drop=True)
-
-
-def select_sat_groups(
-    site_scores: pd.DataFrame,
-    modalities: Sequence[str],
-    mode: str,
-    unique_weight: float,
-    top_k: int,
-    sat_modality: str = "sat",
-    test: bool = False,
-) -> Tuple[List[str], List[str]]:
-    """Select positive and negative satellite image groups for VisDiff."""
-    positives, negatives = rank_sat_groups(
-        site_scores, modalities, mode, unique_weight, top_k, sat_modality, test=test
-    )
-    return (
-        positives["sat_path"].tolist() if not positives.empty else [],
-        negatives["sat_path"].tolist() if not negatives.empty else [],
     )

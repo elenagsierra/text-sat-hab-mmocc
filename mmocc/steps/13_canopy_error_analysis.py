@@ -10,8 +10,7 @@
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
-"""Relate habitat descriptor prediction errors to tree canopy cover.
-Uses satellite remote sensing features for habitat similarity computation."""
+"""Relate habitat descriptor prediction errors to tree canopy cover."""
 
 import math
 from dataclasses import dataclass
@@ -34,16 +33,17 @@ from mmocc.config import (
     cache_path,
     default_sat_backbone,
     num_habitat_descriptions,
+    pca_dim,
 )
 from mmocc.utils import get_focal_species_ids, load_data
 
 CLIP_MODEL_NAME = "ViT-bigG-14"
 CLIP_PRETRAINED = "laion2b_s39b_b160k"
-CLIP_SAT_BACKBONE = "clip_vitbigg14"
+CLIP_IMAGE_BACKBONE = "clip_vitbigg14"
 OUTPUT_DIR = cache_path / "habitat_explainability"
 
 DESCRIPTOR_FILES: dict[str, Path] = {
-    "visdiff_clip": cache_path / "visdiff_sat_descriptions.csv",
+    "visdiff_clip": cache_path / "visdiff_descriptions.csv",
     "expert_clip": cache_path / "expert_habitat_descriptions.csv",
 }
 CANOPY_COLLECTION = "MODIS/061/MOD44B"
@@ -124,13 +124,17 @@ def select_descriptors(
     subset = subset[subset["difference"] != ""]
     if subset.empty:
         return [], np.empty((0,), dtype=np.float32)
-    subset = subset.dropna(subset=["auroc"])
-    subset = subset.sort_values("auroc", ascending=False)
+    if "score" in subset.columns:
+        subset["score"] = pd.to_numeric(subset["score"], errors="coerce")
+    else:
+        subset["score"] = 1.0
+    subset = subset.dropna(subset=["score"])
+    subset = subset.sort_values("score", ascending=False)
     subset = subset.drop_duplicates(subset="difference")
     if limit is not None:
         subset = subset.head(limit)
     texts = subset["difference"].tolist()
-    scores = subset["auroc"].fillna(0.0).astype(float).to_numpy()
+    scores = subset["score"].fillna(1.0).astype(float).to_numpy()
     if len(scores) == 0:
         scores = np.ones(len(texts), dtype=np.float32)
     return texts, scores.astype(np.float32)
@@ -218,6 +222,8 @@ def evaluate_species(
     descriptor_backbone: str,
     descriptor_limit: int | None,
     sat_backbone: str,
+    image_backbone: str,
+    image_pca_dim: int,
     use_range_filter: bool,
 ) -> tuple[list[dict], list[dict], dict]:
     original_limit = mm_utils.limit_to_range
@@ -240,7 +246,7 @@ def evaluate_species(
             _,
             _,
             features_modalities,
-        ) = load_data(taxon_id, {"sat", "covariates"}, None, sat_backbone)
+        ) = load_data(taxon_id, {"image", "sat"}, image_backbone, sat_backbone)
     finally:
         mm_utils.limit_to_range = original_limit
 
@@ -254,7 +260,7 @@ def evaluate_species(
 
     descriptor_embeddings = get_text_encoder().encode(descriptor_texts)
     habitat_features = compute_similarity_features(
-        features_modalities["sat"], descriptor_embeddings, descriptor_scores
+        features_modalities["image"], descriptor_embeddings, descriptor_scores
     )
 
     sat_scaler = StandardScaler().fit(features_modalities["sat"][mask_train])
@@ -268,10 +274,9 @@ def evaluate_species(
 
     feature_path = cache_path / "features"
     ids_all = np.load(
-        feature_path / f"wi_blank_sat_features_{sat_backbone}_ids.npy",
-        allow_pickle=True,
+        feature_path / f"wi_blank_image_features_{image_backbone}_ids.npy"
     )
-    locs = np.load(feature_path / f"wi_blank_sat_features_{sat_backbone}_locs.npy", allow_pickle=True)
+    locs = np.load(feature_path / f"wi_blank_image_features_{image_backbone}_locs.npy")
     loc_ids = ids_all[mask_test]
     locs = locs[mask_test]
     latitudes = locs[:, 0]
@@ -301,6 +306,7 @@ def evaluate_species(
                 n_valid=int(valid.sum()),
                 n_test=int(mask_test.sum()),
                 sat_backbone=sat_backbone,
+                image_backbone=image_backbone,
             )
         )
 
@@ -311,6 +317,7 @@ def evaluate_species(
             taxon_id=taxon_id,
             canopy_fraction=float(canopy[i]),
             sat_backbone=sat_backbone,
+            image_backbone=image_backbone,
             descriptor_backbone=descriptor_backbone,
         )
         for idx, text in enumerate(descriptor_texts):
@@ -323,6 +330,7 @@ def evaluate_species(
         common_name=common_name,
         descriptor_backbone=descriptor_backbone,
         sat_backbone=sat_backbone,
+        image_backbone=image_backbone,
         num_descriptors=len(descriptor_texts),
     )
     return per_descriptor_rows, per_location_rows, summary_row
@@ -332,7 +340,9 @@ def main(
     descriptor_backbones: Sequence[str] | str | None = None,
     descriptor_limit: int | None = num_habitat_descriptions,
     sat_backbone: str = default_sat_backbone,
+    image_backbone: str = CLIP_IMAGE_BACKBONE,
     species_ids: Sequence[str] | str | None = None,
+    image_pca_dim: int = pca_dim,
     output_suffix: str | None = None,
     use_range_filter: bool | str = True,
 ):
@@ -360,6 +370,8 @@ def main(
                     backbone,
                     descriptor_limit,
                     sat_backbone,
+                    image_backbone,
+                    image_pca_dim,
                     use_range_filter,
                 )
                 per_descriptor_rows.extend(desc_rows)

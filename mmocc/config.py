@@ -9,7 +9,6 @@ from dotenv import find_dotenv, load_dotenv
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 set_start_method("spawn", force=True)
 
-# Load .env relative to this module so submitit jobs resolve the same config
 load_dotenv(find_dotenv(usecwd=True))
 
 cache_path = Path(os.environ["CACHE_PATH"])

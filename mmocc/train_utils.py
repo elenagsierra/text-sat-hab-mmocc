@@ -179,7 +179,6 @@ sat_model_labels = {
     "taxabind": "TaxaBind",
     "dinov2": "DINOv2",
     "dinov3": "DINOv3",
-    "graft": "GRAFT (Sentinel-2)",
     "dinov2_vitb14": "DINOv2 ViT-B/14",
     "dinov3_vitl16_sat": "DINOv3 ViT-L/16 (SAT-493M)",
     "random_resnet50": "Random ResNet-50",
