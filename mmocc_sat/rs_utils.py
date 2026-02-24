@@ -3,8 +3,8 @@ from functools import cache
 import ee
 import numpy as np
 
-from mmocc.config import rs_scale
-from mmocc.utils import memory
+from mmocc_sat.config import rs_scale
+from mmocc_sat.utils import memory
 
 
 @cache

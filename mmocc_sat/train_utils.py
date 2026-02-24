@@ -4,8 +4,8 @@ import torch
 from torchvision.transforms import v2
 from torchvision.transforms.functional import resize
 
-from mmocc.config import weights_path
-from mmocc.utils import de_normalize_transform
+from mmocc_sat.config import weights_path
+from mmocc_sat.utils import de_normalize_transform
 
 
 class SpeciesNetFeatureExtractor(torch.nn.Module):

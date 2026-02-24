@@ -11,7 +11,7 @@ import requests
 from joblib import Memory
 from PIL import Image
 
-from mmocc.config import cache_path
+from mmocc_sat.config import cache_path
 
 SENTINEL_DATASET = "COPERNICUS/S2_SR_HARMONIZED"
 SENTINEL_RGB_BANDS = ("B4", "B3", "B2")

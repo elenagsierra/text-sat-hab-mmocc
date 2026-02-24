@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import font_manager
 from PIL import Image
 
-from mmocc.config import cache_path, fig_column_width, golden_ratio
+from mmocc_sat.config import cache_path, fig_column_width, golden_ratio
 
 
 def setup_matplotlib():
