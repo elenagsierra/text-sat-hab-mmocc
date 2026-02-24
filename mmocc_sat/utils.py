@@ -18,7 +18,7 @@ from scipy.spatial.distance import cdist
 from sklearn.impute import KNNImputer
 from torchvision.transforms import v2
 
-from mmocc.config import (
+from mmocc_sat.config import (
     cache_path,
     default_image_backbone,
     default_sat_backbone,
@@ -612,7 +612,7 @@ def compute_species_stats(taxon_id: str) -> Optional[Dict]:
 
 def run_biolith_in_process(queue, gpu_env_vars, *args_for_numpyro):
 
-    from mmocc.solvers.biolith import fit_biolith
+    from mmocc_sat.solvers.biolith import fit_biolith
 
     # Set GPU environment variables in spawned process
     for key, value in gpu_env_vars.items():

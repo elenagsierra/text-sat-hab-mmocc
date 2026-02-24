@@ -26,20 +26,20 @@ import fire
 import pandas as pd
 import submitit
 
-from mmocc.config import (
+from mmocc_sat.config import (
     cache_path,
     default_image_backbone,
     default_sat_backbone,
     visdiff_model_name,
 )
-from mmocc.interpretability_utils import (
+from mmocc_sat.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
     load_sat_lookup,
     resolve_fit_results_path,
     select_sat_groups,
 )
-from mmocc.utils import (
+from mmocc_sat.utils import (
     experiment_to_filename,
     get_focal_species_ids,
     get_submitit_executor,

@@ -6,8 +6,8 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from mmocc.config import cache_path, wi_image_path
-from mmocc.utils import (
+from mmocc_sat.config import cache_path, wi_image_path
+from mmocc_sat.utils import (
     experiment_to_filename,
     filename_to_experiment,
     load_data,
