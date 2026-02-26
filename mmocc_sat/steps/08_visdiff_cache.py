@@ -64,9 +64,12 @@ def _parse_arg(value: str):
 
 
 def _normalize_timestamp(value) -> str:
-    if isinstance(value, datetime):
-        return pd.Timestamp(value, tz="UTC").isoformat()
-    return pd.to_datetime(value, utc=True).isoformat()
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return ts.isoformat()
 
 
 def _cache_key(
