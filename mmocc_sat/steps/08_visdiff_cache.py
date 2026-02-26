@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Sequence
 
 import fire
+import joblib
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -201,8 +202,11 @@ def materialize_sat_images_from_joblib(
             continue
 
         try:
-            with out_pkl.open("rb") as handle:
-                patch = pickle.load(handle)
+            try:
+                patch = joblib.load(out_pkl)
+            except Exception:
+                with out_pkl.open("rb") as handle:
+                    patch = pickle.load(handle)
             if patch is None:
                 counts["cache_miss"] += 1
                 continue
