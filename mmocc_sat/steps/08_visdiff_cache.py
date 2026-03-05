@@ -148,6 +148,26 @@ def _to_rgb_uint8(array: np.ndarray) -> np.ndarray:
     return arr
 
 
+def _enhance_display(
+    image: np.ndarray, *, low_pct: float = 2.0, high_pct: float = 98.0, gamma: float = 0.85
+) -> np.ndarray:
+    """Apply percentile stretch + gamma for display-friendly PNGs."""
+    img = image.astype(np.float32) / 255.0
+    out = np.empty_like(img, dtype=np.float32)
+    for c in range(img.shape[2]):
+        channel = img[:, :, c]
+        lo = float(np.percentile(channel, low_pct))
+        hi = float(np.percentile(channel, high_pct))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            out[:, :, c] = np.clip(channel, 0.0, 1.0)
+            continue
+        stretched = (channel - lo) / (hi - lo)
+        out[:, :, c] = np.clip(stretched, 0.0, 1.0)
+    if gamma > 0 and gamma != 1.0:
+        out = np.power(out, gamma)
+    return np.clip(out * 255.0, 0, 255).astype(np.uint8)
+
+
 def materialize_sat_images_from_joblib(
     *,
     max_sites: int | None = None,
@@ -160,6 +180,10 @@ def materialize_sat_images_from_joblib(
     dataset: str = DEFAULT_DATASET,
     latlon_round: int = 6,
     joblib_fetch_dir: str | Path | None = None,
+    enhance_display: bool = True,
+    enhance_low_pct: float = 2.0,
+    enhance_high_pct: float = 98.0,
+    enhance_gamma: float = 0.85,
 ) -> dict:
     joblib_fetch_dir = Path(joblib_fetch_dir) if joblib_fetch_dir else (
         cache_path / "joblib_graft" / "mmocc" / "rs_graft" / "fetch_sentinel_patch"
@@ -211,6 +235,13 @@ def materialize_sat_images_from_joblib(
                 counts["cache_miss"] += 1
                 continue
             patch_rgb = _to_rgb_uint8(np.asarray(patch))
+            if enhance_display:
+                patch_rgb = _enhance_display(
+                    patch_rgb,
+                    low_pct=enhance_low_pct,
+                    high_pct=enhance_high_pct,
+                    gamma=enhance_gamma,
+                )
             Image.fromarray(patch_rgb, mode="RGB").save(out_path, format="PNG")
             counts["written"] += 1
         except Exception as exc:
@@ -250,6 +281,10 @@ def main(
     preload_dataset: str = DEFAULT_DATASET,
     preload_latlon_round: int = 6,
     preload_joblib_fetch_dir: str | Path | None = None,
+    preload_enhance_display: bool = True,
+    preload_enhance_low_pct: float = 2.0,
+    preload_enhance_high_pct: float = 98.0,
+    preload_enhance_gamma: float = 0.85,
 ):
     materialize_sat_images_from_joblib(
         max_sites=preload_max_sites,
@@ -262,6 +297,10 @@ def main(
         dataset=preload_dataset,
         latlon_round=preload_latlon_round,
         joblib_fetch_dir=preload_joblib_fetch_dir,
+        enhance_display=preload_enhance_display,
+        enhance_low_pct=preload_enhance_low_pct,
+        enhance_high_pct=preload_enhance_high_pct,
+        enhance_gamma=preload_enhance_gamma,
     )
 
     data_main = _load_data_main()
