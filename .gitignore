@@ -4,6 +4,8 @@ build/
 symlink/
 weights/
 figures/
+AGENTS.md
+recovered_sentinel_images/
 
 .runtime/
 .cache*/

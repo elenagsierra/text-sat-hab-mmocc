@@ -9,6 +9,7 @@
 #     "requests==2.32.5",
 #     "tqdm",
 #     "transformers",
+#     "setuptools<81"
 # ]
 #
 # [tool.uv.sources]
@@ -98,8 +99,8 @@ def extract_graft_features(
 
     output_path = cache_path / "features"
     output_path.mkdir(parents=True, exist_ok=True)
-    feature_file = output_path / "wi_blank_sat_features_graft.npy"
-    id_file = output_path / "wi_blank_sat_features_graft_ids.npy"
+    feature_file = output_path / "wi_blank_sat_features_graft_seasonal.npy"
+    id_file = output_path / "wi_blank_sat_features_graft_ids_seasonal.npy"
 
     if skip_existing and feature_file.exists() and id_file.exists():
         print(f"GRAFT sat features already exist at {feature_file}, skipping.")

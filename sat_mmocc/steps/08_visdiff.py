@@ -35,7 +35,6 @@ from mmocc.config import (
 from mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
-    load_image_lookup,
     resolve_fit_results_path,
     select_image_groups,
 )
@@ -47,11 +46,21 @@ from mmocc.utils import (
 )
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_MODALITY = "sat,covariates"
+DEFAULT_MODALITY = "image,sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
 VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_descriptions.csv"
+VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_naip_descriptions.csv"
+# Maps imagery_source keyword → (png directory, default output CSV)
+IMAGERY_SOURCE_PNG_DIRS = {
+    "sentinel": cache_path / "sat_images_png",
+    "naip": cache_path / "naip_images_png",
+}
+IMAGERY_SOURCE_OUTPUT_FILES = {
+    "sentinel": VISDIFF_DESCRIPTIONS_FILE,
+    "naip": VISDIFF_NAIP_DESCRIPTIONS_FILE,
+}
 DEFAULT_HYPOTHESES_LIMIT = None
 
 
@@ -377,6 +386,7 @@ def run_species_visdiff_job(
     wandb_entity: Optional[str] = None,
     wandb_project: Optional[str] = None,
     cache_dir: Path | str = cache_path / "visdiff_cache",
+    imagery_source: str = "sentinel",
 ):
     logger = logging.getLogger(__name__)
     taxon_map = get_taxon_map()
@@ -413,8 +423,10 @@ def run_species_visdiff_job(
         fit_results,
     )
 
-    sat_png_dir = cache_path / "sat_images_png"
-    site_scores["image_path"] = site_scores["loc_id"].apply(lambda lid: str(sat_png_dir / f"{lid}.png"))
+    png_dir = IMAGERY_SOURCE_PNG_DIRS.get(
+        imagery_source, cache_path / f"{imagery_source}_images_png"
+    )
+    site_scores["image_path"] = site_scores["loc_id"].apply(lambda lid: str(png_dir / f"{lid}.png"))
     site_scores["image_exists"] = site_scores["image_path"].apply(lambda p: Path(p).exists())
 
     available_images = int(
@@ -495,7 +507,8 @@ def main(
     wandb_entity: str | None = os.getenv("VISDIFF_WANDB_ENTITY"),
     wandb_project: str | None = os.getenv("VISDIFF_WANDB_PROJECT"),
     cache_dir: str | None = None,
-    output_file: str | Path = VISDIFF_DESCRIPTIONS_FILE,
+    output_file: str | Path | None = None,
+    imagery_source: str = "sentinel",
 ):
 
     modality_sets = normalize_modalities_arg(modalities)
@@ -506,6 +519,10 @@ def main(
     species_list = normalize_species_ids(species_ids)
     modes_list = normalize_modes(modes)
     cache_dir = cache_dir or str(DEFAULT_CACHE_DIR)
+    if output_file is None:
+        output_file = IMAGERY_SOURCE_OUTPUT_FILES.get(
+            imagery_source, cache_path / f"visdiff_{imagery_source}_descriptions.csv"
+        )
     output_path = Path(output_file)
 
     existing_rows = load_existing_visdiff_rows(output_path)
@@ -570,6 +587,7 @@ def main(
                             wandb_entity,
                             wandb_project,
                             experiment_cache_dir,
+                            imagery_source,
                         )
                         jobs.append(job)
 
