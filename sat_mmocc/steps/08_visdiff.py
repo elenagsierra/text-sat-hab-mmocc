@@ -50,8 +50,8 @@ DEFAULT_MODALITY = "image,sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
-VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_descriptions.csv"
-VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_naip_descriptions.csv"
+VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_prompt1.csv"
+VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_naip_prompt1.csv"
 # Maps imagery_source keyword → (png directory, default output CSV)
 IMAGERY_SOURCE_PNG_DIRS = {
     "sentinel": cache_path / "sat_images_png",
@@ -323,29 +323,37 @@ def run_pyvisdiff(
     cache_dir: Optional[str | Path] = cache_path / "visdiff_cache",
 ) -> Dict:
     captioner_prompt = (
-        "Describe this satellite imagery in detail. Focus on land cover, vegetation, "
-        "terrain features, and environmental characteristics visible from above."
+        """Describe the local habitat features visible in this image.
+
+            Focus on directly observable features within the frame:
+            land cover, vegetation structure, hydrology, substrate exposure, habitat edges, patch mosaics, fragmentation, disturbance, and management patterns.
+
+            Use specific habitat terms when possible, such as riparian corridor, marsh vegetation, canopy gap, drainage ditch, mudflat, shrub patch, row crop pattern, burn scar, levee, meadow edge, exposed sediment, pond margin, or fragmented woodland.
+
+            Do not mention the imaging platform or modality. Do not mention satellites, drones, aerial imagery, resolution, image quality, Earth, space, atmospheric haze, global cloud cover, or large-scale weather systems.
+
+            Describe only visible habitat content at the local site scale.
+        """
     )
     proposer_prompt = """
-        The following are the result of captioning two groups of images:
+        The following text contains captions for two groups of habitat images:
 
         {text}
 
-        I am a machine learning researcher trying to figure out the major differences between these two groups so I can better understand my data.
+        I am trying to identify distribution shift between Group A and Group B.
 
-        Come up with 10 distinct concepts that are more likely to be true for Group A compared to Group B. Please write a list of captions (separated by bullet points "*"). For example:
-        * "a car in the rain"
-        * "low quality"
-        * "cars from a side view"
-        * "a joyful atmosphere"
+        List 10 distinct concepts that are more likely to be true for Group A than Group B.
 
-        Ignore any references to humans or animals, and focus on the environment. Do not talk about the caption, e.g., "caption with one word" and do not list more than one concept. The hypothesis should be a caption, so hypotheses like "more of ...", "presence of ...", "images with ..." are incorrect. Also do not enumerate possibilities within parentheses. Here are examples of bad outputs and their corrections:
-        * INCORRECT: "a person strolling around in a mall" CORRECTED: "mall"
-        * INCORRECT: "various city environments like buildings, parks, and streets" CORRECTED: "city environments"
-        * INCORRECT: "images of household object (e.g. bowl, vaccuum, lamp)" CORRECTED: "household objects"
-        * INCORRECT: "Different types of vehicles including cars, trucks, boats, and RVs" CORRECTED: "vehicles"
+        Requirements:
+        - Each concept must be a short noun phrase.
+        - Each concept must describe one visible habitat feature, land cover pattern, hydrologic feature, substrate feature, disturbance feature, or management feature.
+        - Focus on scene content, not modality or caption style.
+        - Ignore humans and animals.
+        - Do not mention sensor/platform terms, image quality, resolution, Earth, space, atmospheric effects, or large-scale weather.
+        - Do not use phrases like "more of", "presence of", or "images with".
+        - Reject any concept that describes the imaging process rather than the habitat.
 
-        Again, I want to figure out what kind of distribution shift are there. List properties that hold more often for the images (not captions) in group A compared to group B. Answer with a list (separated by bullet points "*"). Your response:
+        Answer using bullet points starting with "*".
     """
 
     pyvisdiff_run = _load_pyvisdiff_entrypoint()
