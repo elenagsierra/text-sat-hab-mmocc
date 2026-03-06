@@ -26,19 +26,19 @@ import fire
 import pandas as pd
 import submitit
 
-from mmocc.config import (
+from sat_mmocc.config import (
     cache_path,
     default_image_backbone,
     default_sat_backbone,
     visdiff_model_name,
 )
-from mmocc.interpretability_utils import (
+from sat_mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
     resolve_fit_results_path,
     select_image_groups,
 )
-from mmocc.utils import (
+from sat_mmocc.utils import (
     experiment_to_filename,
     get_focal_species_ids,
     get_submitit_executor,
@@ -50,8 +50,8 @@ DEFAULT_MODALITY = "image,sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
-VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_prompt1.csv"
-VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_naip_prompt1.csv"
+VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_prompt2.csv"
+VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_naip_prompt2.csv"
 # Maps imagery_source keyword → (png directory, default output CSV)
 IMAGERY_SOURCE_PNG_DIRS = {
     "sentinel": cache_path / "sat_images_png",
@@ -322,38 +322,25 @@ def run_pyvisdiff(
     wandb_dir: Optional[str | Path] = None,
     cache_dir: Optional[str | Path] = cache_path / "visdiff_cache",
 ) -> Dict:
-    captioner_prompt = (
-        """Describe the local habitat features visible in this image.
+    captioner_prompt = """
+    Describe only the visible habitat features in this image at the local site scale.
 
-            Focus on directly observable features within the frame:
-            land cover, vegetation structure, hydrology, substrate exposure, habitat edges, patch mosaics, fragmentation, disturbance, and management patterns.
+    Focus on land cover, vegetation structure, hydrology, exposed substrate, habitat edges, patch mosaics, fragmentation, disturbance, and management patterns.
 
-            Use specific habitat terms when possible, such as riparian corridor, marsh vegetation, canopy gap, drainage ditch, mudflat, shrub patch, row crop pattern, burn scar, levee, meadow edge, exposed sediment, pond margin, or fragmented woodland.
+    Use specific observable feature phrases. Do not mention image source, sensor, resolution, Earth, space, weather, location, region, biome, ecoregion, or any proper noun. Do not guess where the scene is. Replace named landscapes with generic visual descriptions.
 
-            Do not mention the imaging platform or modality. Do not mention satellites, drones, aerial imagery, resolution, image quality, Earth, space, atmospheric haze, global cloud cover, or large-scale weather systems.
-
-            Describe only visible habitat content at the local site scale.
-        """
-    )
+    Example: say "sand dunes with sparse vegetation", not "Sahara desert landscape".
+    """
     proposer_prompt = """
-        The following text contains captions for two groups of habitat images:
+    The following text contains captions for two groups of habitat images:
 
-        {text}
+    {text}
 
-        I am trying to identify distribution shift between Group A and Group B.
+    List 10 distinct concepts more likely in Group A than Group B.
 
-        List 10 distinct concepts that are more likely to be true for Group A than Group B.
+    Each concept must be a short noun phrase describing one visible habitat feature. Use only generic observable descriptors. Do not mention modality, image quality, proper nouns, place names, geographic labels, biome labels, or inferred location. Rewrite any named place or regional term into a purely visual habitat phrase.
 
-        Requirements:
-        - Each concept must be a short noun phrase.
-        - Each concept must describe one visible habitat feature, land cover pattern, hydrologic feature, substrate feature, disturbance feature, or management feature.
-        - Focus on scene content, not modality or caption style.
-        - Ignore humans and animals.
-        - Do not mention sensor/platform terms, image quality, resolution, Earth, space, atmospheric effects, or large-scale weather.
-        - Do not use phrases like "more of", "presence of", or "images with".
-        - Reject any concept that describes the imaging process rather than the habitat.
-
-        Answer using bullet points starting with "*".
+    Answer using bullet points starting with "*".
     """
 
     pyvisdiff_run = _load_pyvisdiff_entrypoint()
