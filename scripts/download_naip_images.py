@@ -72,7 +72,7 @@ DEFAULT_YEAR_RADIUS = 5
 DEFAULT_TIME_WINDOW_DAYS = 60
 
 # joblib cache so interrupted runs resume without re-fetching
-_MEMORY = Memory(cache_path / "naip_rgb_cache", verbose=0)
+_MEMORY = Memory(cache_path / "naip_wi_rgb_cache", verbose=0)
 _EE_PROJECT: str | None = None
 
 
@@ -151,6 +151,7 @@ def _download_thumb(
     image: ee.Image,
     region: ee.Geometry,
     size: int,
+    pixel_size_meters: float = NAIP_PIXEL_SIZE_METERS,
 ) -> np.ndarray:
     """Download a thumbnail PNG and return as uint8 RGB array.
 
@@ -166,8 +167,14 @@ def _download_thumb(
             max=255,
         )
     )
-    response = requests.get(url, timeout=90)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, timeout=90)
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        # 400 / 404 means EE has no valid pixels for this region (e.g. seam,
+        # NAIP tile boundary, or fully-masked area) — treat as missing.
+        print(f"  thumbnail HTTP error ({exc.response.status_code}), skipping.")
+        return None
     with Image.open(BytesIO(response.content)) as img:
         img = img.convert("RGB")
         if img.size != (size, size):
@@ -229,7 +236,8 @@ def _fetch_patch_cached(
 
     half_extent = (size * pixel_size_meters) / 2.0
     region = point.buffer(half_extent).bounds()
-    return _download_thumb(image, region, size)
+    arr = _download_thumb(image, region, size, pixel_size_meters)
+    return arr  # None propagates as "no imagery" to _process_row
 
 
 # ---------------------------------------------------------------------------
@@ -308,15 +316,29 @@ def main(
     Note: NAIP covers CONUS only.  Rows outside the continental United States
     will not find imagery and are silently skipped (status: failed).
     """
-    out_root = Path(output_dir) if output_dir else cache_path / "naip_images_png"
+    out_root = Path(output_dir) if output_dir else cache_path / "naip_wi_images_png"
     out_root.mkdir(parents=True, exist_ok=True)
 
     pkl_path = cache_path / "wi_blank_images.pkl"
     print(f"Loading {pkl_path} ...")
-    df = pd.read_pickle(pkl_path).reset_index(drop=True)
+    df = pd.read_pickle(pkl_path)
 
-    # Deduplicate: one representative row per loc_id (first occurrence)
-    df = df.drop_duplicates(subset="loc_id", keep="first").reset_index(drop=True)
+    # Mirror load_image_lookup() exactly so downloaded images correspond to the
+    # same loc_ids and timestamps that 08_visdiff.py uses for ground-level images.
+    #
+    # Step 1: filter to validated blank images only
+    valid_path = cache_path / "wi_blank_images_valid.txt"
+    df_valid = pd.read_csv(valid_path, header=None, names=["FilePath"])
+    df = pd.merge(df, df_valid, how="inner", on="FilePath")
+    print(f"  {len(df)} rows after filtering to wi_blank_images_valid.txt")
+
+    # Step 2: sort by Date_Time then deduplicate — keeps earliest timestamp per
+    # loc_id, matching the drop_duplicates behaviour in load_image_lookup()
+    df = (
+        df.sort_values("Date_Time")
+        .drop_duplicates(subset="loc_id", keep="first")
+        .reset_index(drop=True)
+    )
 
     if max_rows is not None:
         df = df.head(max_rows).copy()

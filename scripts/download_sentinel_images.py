@@ -63,7 +63,7 @@ DEFAULT_TIME_WINDOW_DAYS = 60
 DEFAULT_YEAR_RADIUS = 2
 
 # joblib cache so interrupted runs resume without re-fetching
-_MEMORY = Memory(cache_path / "sentinel_rgb_cache", verbose=0)
+_MEMORY = Memory(cache_path / "sentinel_wi_rgb_cache", verbose=0)
 _EE_PROJECT: str | None = None
 
 
@@ -191,25 +191,62 @@ def _download_thumb(
     image: ee.Image,
     region: ee.Geometry,
     size: int,
+    pixel_size_meters: float = SENTINEL_PIXEL_SIZE_METERS,
 ) -> np.ndarray:
     """Download a thumbnail PNG from Earth Engine and return as uint8 RGB array.
 
-    Uses a fixed reflectance stretch of [0, 0.3] (i.e. 0–3000 DN before /10000)
-    which is appropriate for Sentinel-2 SR over most land-cover types and avoids
-    the washed-out / near-black appearance caused by stretching to [0, 1].
+    Uses a per-scene 2nd/98th percentile stretch with a shared scalar
+    min/max across all three RGB bands.  A single shared stretch preserves
+    colour balance (snow stays white, canopy stays green) so that images
+    from different biomes and seasons remain reliably comparable by eye,
+    while still adapting to each scene's actual dynamic range.
     """
-    url = image.getThumbURL(
-        dict(
-            region=region,
-            dimensions=[size, size],
-            format="png",
-            min=0,
-            max=0.3,   # 3000 DN — covers most vegetated/soil/urban scenes well
-            gamma=1.4, # mild gamma lift to brighten shadows without blowout
+    bands = list(SENTINEL_RGB_BANDS)
+    p2, p98 = 0.0, 0.5  # sensible fallback (matches prior fixed stretch)
+    try:
+        stats = image.reduceRegion(
+            reducer=ee.Reducer.percentile([2, 98]),
+            geometry=region,
+            scale=pixel_size_meters,
+            maxPixels=1e6,
+            bestEffort=True,
+        ).getInfo()
+        # dict.get only substitutes the default when the key is absent;
+        # guard explicitly against None values returned for empty/masked regions.
+        p2_vals  = [v for b in bands if (v := stats.get(f"{b}_p2"))  is not None]
+        p98_vals = [v for b in bands if (v := stats.get(f"{b}_p98")) is not None]
+        if p2_vals and p98_vals:
+            p2  = min(p2_vals)
+            p98 = max(p98_vals)
+    except Exception:
+        pass  # fall back to fixed stretch
+    p98 = max(p98, p2 + 1e-4)  # guard against flat/missing image
+
+    try:
+        url = image.getThumbURL(
+            dict(
+                region=region,
+                dimensions=[size, size],
+                format="png",
+                min=0,
+                max=.6,
+                gamma=1.0,  # no extra gamma — percentile stretch handles brightness
+            )
         )
-    )
-    response = requests.get(url, timeout=90)
-    response.raise_for_status()
+    except Exception as exc:
+        # getThumbURL makes a server-side call in EE API ≥1.x and can raise
+        # EEException with messages like "Collection.reduceColumns: Empty date
+        # ranges not supported" when the composite is empty or fully masked.
+        print(f"  getThumbURL failed ({exc}), skipping.")
+        return None
+
+    try:
+        response = requests.get(url, timeout=90)
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        print(f"  thumbnail HTTP error ({exc.response.status_code}), skipping.")
+        return None
+
     with Image.open(BytesIO(response.content)) as img:
         img = img.convert("RGB")
         if img.size != (size, size):
@@ -276,7 +313,7 @@ def _fetch_patch_cached(
 
     half_extent = (size * pixel_size_meters) / 2.0
     region = point.buffer(half_extent).bounds()
-    return _download_thumb(image, region, size)
+    return _download_thumb(image, region, size, pixel_size_meters)
 
 
 # ---------------------------------------------------------------------------
@@ -358,15 +395,29 @@ def main(
     seasonal fallback logic applies regardless of which row is chosen).
     """
     # Output dir must match what step 8 hard-codes
-    out_root = Path(output_dir) if output_dir else cache_path / "sat_images_png"
+    out_root = Path(output_dir) if output_dir else cache_path / "sat_wi_rgb_images_png"
     out_root.mkdir(parents=True, exist_ok=True)
 
     pkl_path = cache_path / "wi_blank_images.pkl"
     print(f"Loading {pkl_path} ...")
-    df = pd.read_pickle(pkl_path).reset_index(drop=True)
+    df = pd.read_pickle(pkl_path)
 
-    # Deduplicate: one representative row per loc_id (first occurrence)
-    df = df.drop_duplicates(subset="loc_id", keep="first").reset_index(drop=True)
+    # Mirror load_image_lookup() exactly so downloaded images correspond to the
+    # same loc_ids and timestamps that 08_visdiff.py uses for ground-level images.
+    #
+    # Step 1: filter to validated blank images only
+    valid_path = cache_path / "wi_blank_images_valid.txt"
+    df_valid = pd.read_csv(valid_path, header=None, names=["FilePath"])
+    df = pd.merge(df, df_valid, how="inner", on="FilePath")
+    print(f"  {len(df)} rows after filtering to wi_blank_images_valid.txt")
+
+    # Step 2: sort by Date_Time then deduplicate — keeps earliest timestamp per
+    # loc_id, matching the drop_duplicates behaviour in load_image_lookup()
+    df = (
+        df.sort_values("Date_Time")
+        .drop_duplicates(subset="loc_id", keep="first")
+        .reset_index(drop=True)
+    )
 
     if max_rows is not None:
         df = df.head(max_rows).copy()
