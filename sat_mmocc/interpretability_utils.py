@@ -6,8 +6,8 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from mmocc.config import cache_path, wi_image_path
-from mmocc.utils import (
+from sat_mmocc.config import cache_path, default_image_backbone, wi_image_path
+from sat_mmocc.utils import (
     experiment_to_filename,
     filename_to_experiment,
     load_data,
@@ -16,6 +16,14 @@ from mmocc.utils import (
 LOGGER = logging.getLogger(__name__)
 FIT_RESULTS_DIR = cache_path / "fit_results"
 FEATURES_DIR = cache_path / "features"
+
+
+def _normalize_backbone_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "none"}:
+        return None
+    return value
 
 
 def load_image_lookup() -> pd.DataFrame:
@@ -82,10 +90,7 @@ def load_fit_results(path: Path) -> Dict:
 
 
 def load_location_ids(image_backbone: str | None) -> np.ndarray:
-    if image_backbone is None:
-        raise ValueError(
-            "Image backbone must be defined to recover location identifiers."
-        )
+    image_backbone = _normalize_backbone_name(image_backbone) or default_image_backbone
     ids_path = FEATURES_DIR / f"wi_blank_image_features_{image_backbone}_ids.npy"
     if not ids_path.exists():
         raise FileNotFoundError(f"Missing location id file at {ids_path}.")

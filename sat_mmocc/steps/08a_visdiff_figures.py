@@ -18,7 +18,7 @@ Usage examples
 
 # Specific CSV, NAIP imagery, PDF output
 ./sat_mmocc/steps/09_visdiff_figures.py \
-    --visdiff_csv=/path/to/visdiff_naip_prompt2.csv \
+    --visdiff_csv=/path/to/visdiff_naip_wi_prompt2.csv \
     --imagery_source=naip \
     --fmt=pdf
 
@@ -58,7 +58,7 @@ matplotlib.use("Agg")  # headless — no display needed
 LOGGER = logging.getLogger(__name__)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-DEFAULT_VISDIFF_CSV = cache_path / "visdiff_naip_prompt2.csv"
+DEFAULT_VISDIFF_CSV = cache_path / "visdiff_naip_wi_prompt2.csv"
 DEFAULT_OUTPUT_DIR = cache_path / "visdiff_naip_figures_prompt2"
 MODALITIES = ["image", "sat", "covariates"]
 TOP_K = 50
@@ -68,8 +68,8 @@ N_HYPOTHESES = 15
 THUMB_SIZE = (192, 192)
 
 IMAGERY_SOURCE_PNG_DIRS = {
-    "sentinel": cache_path / "sat_images_png",
-    "naip": cache_path / "naip_images_png",
+    "sentinel": cache_path / "sat_wi_rgb_images_png",
+    "naip": cache_path / "naip_wi_images_png",
 }
 
 

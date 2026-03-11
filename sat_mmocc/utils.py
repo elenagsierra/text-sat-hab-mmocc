@@ -244,6 +244,10 @@ def filename_to_experiment(filename):
     modalities = set(matches.group("modalities").split("_"))
     image_backbone_name = matches.group("image_backbone_name")
     sat_backbone_name = matches.group("sat_backbone_name")
+    if image_backbone_name == "None":
+        image_backbone_name = None
+    if sat_backbone_name == "None":
+        sat_backbone_name = None
     return taxon_id, modalities, image_backbone_name, sat_backbone_name
 
 
@@ -335,10 +339,14 @@ def load_data(
     image_backbone_name_data = (
         image_backbone_name
         if image_backbone_name is not None
+        and str(image_backbone_name).strip().lower() != "none"
         else default_image_backbone
     )
     sat_backbone_name_data = (
-        sat_backbone_name if sat_backbone_name is not None else default_sat_backbone
+        sat_backbone_name
+        if sat_backbone_name is not None
+        and str(sat_backbone_name).strip().lower() != "none"
+        else default_sat_backbone
     )
     feature_path = cache_path / "features"
     ids_all = np.load(

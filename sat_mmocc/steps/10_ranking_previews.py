@@ -3,6 +3,7 @@
 # /// script
 # dependencies = [
 #     "mmocc",
+#     "setuptools<81"
 # ]
 #
 # [tool.uv.sources]

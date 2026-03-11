@@ -76,13 +76,13 @@ matplotlib.use("Agg")  # headless — no display needed
 LOGGER = logging.getLogger(__name__)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_prompt2.csv"
-DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sat_prompt2.csv"
+DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_wi_prompt2.csv"
+DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sat_wi_prompt2.csv"
 DEFAULT_GROUND_CSV = cache_path / "visdiff_descriptions.csv"
-DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_ground_figures"
+DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_naipwi_figures"
 
-NAIP_PNG_DIR = cache_path / "naip_images_png"
-SENTINEL_PNG_DIR = cache_path / "sat_images_png"
+NAIP_PNG_DIR = cache_path / "naip_wi_images_png"
+SENTINEL_PNG_DIR = cache_path / "sat_wi_rgb_images_png"
 
 MODALITIES = ["image", "sat", "covariates"]
 TOP_K = 50

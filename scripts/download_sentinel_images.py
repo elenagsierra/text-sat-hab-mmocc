@@ -202,7 +202,11 @@ def _download_thumb(
     while still adapting to each scene's actual dynamic range.
     """
     bands = list(SENTINEL_RGB_BANDS)
-    p2, p98 = 0.0, 0.5  # sensible fallback (matches prior fixed stretch)
+    # Default true-color stretch for Sentinel-2 surface reflectance (/10000, clamped 0-1).
+    # 0-0.3 gives vivid colours for typical vegetation/land scenes.
+    # For bright scenes (snow, sand, clouds) where p98 > 0.4, fall back to the
+    # per-scene percentile stretch so highlights are not clipped to white.
+    stretch_min, stretch_max = 0.0, 0.3
     try:
         stats = image.reduceRegion(
             reducer=ee.Reducer.percentile([2, 98]),
@@ -218,9 +222,12 @@ def _download_thumb(
         if p2_vals and p98_vals:
             p2  = min(p2_vals)
             p98 = max(p98_vals)
+            p98 = max(p98, p2 + 1e-4)  # guard against flat/missing image
+            if p98 > 0.4:
+                # Bright scene (snow, sand, etc.) — use per-scene percentile stretch
+                stretch_min, stretch_max = p2, p98
     except Exception:
-        pass  # fall back to fixed stretch
-    p98 = max(p98, p2 + 1e-4)  # guard against flat/missing image
+        pass  # fall back to default fixed stretch
 
     try:
         url = image.getThumbURL(
@@ -228,9 +235,9 @@ def _download_thumb(
                 region=region,
                 dimensions=[size, size],
                 format="png",
-                min=0,
-                max=.6,
-                gamma=1.0,  # no extra gamma — percentile stretch handles brightness
+                min=stretch_min,
+                max=stretch_max,
+                gamma=1.0,
             )
         )
     except Exception as exc:
@@ -387,7 +394,7 @@ def main(
     """Download Sentinel-2 RGB patches keyed by loc_id for use with step 8.
 
     One PNG is saved per unique loc_id as:
-        $CACHE_PATH/sat_images_png/{loc_id}.png
+        $CACHE_PATH/sat_wi_rgb_images_png/{loc_id}.png
 
     This matches the path expected by sat_mmocc/steps/08_visdiff.py.
     When a loc_id has multiple observation rows the first row's timestamp

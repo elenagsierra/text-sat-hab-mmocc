@@ -46,16 +46,16 @@ from sat_mmocc.utils import (
 )
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_MODALITY = "image,sat,covariates"
+DEFAULT_MODALITY = "sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
-VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_prompt2.csv"
-VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_naip_prompt2.csv"
+VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv"
+VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_naip_wi_prompt2.csv"
 # Maps imagery_source keyword → (png directory, default output CSV)
 IMAGERY_SOURCE_PNG_DIRS = {
-    "sentinel": cache_path / "sat_images_png",
-    "naip": cache_path / "naip_images_png",
+    "sentinel": cache_path / "sat_wi_rgb_images_png",
+    "naip": cache_path / "naip_wi_images_png",
 }
 IMAGERY_SOURCE_OUTPUT_FILES = {
     "sentinel": VISDIFF_DESCRIPTIONS_FILE,
@@ -355,7 +355,7 @@ def run_pyvisdiff(
         dataset_a_images=positives,
         dataset_b_images=negatives,
         dataset_a_description=f"Environments where {species_name} is likely to be present",
-        dataset_b_description=f"Environments where {species_name} is likely to be absent",
+        dataset_b_description=f"nvironments where {species_name} is likely to be absent",
         config_overrides={
             "captioner": {"prompt": captioner_prompt},
             "proposer": {"model": visdiff_model_name, "prompt": proposer_prompt},
@@ -387,13 +387,18 @@ def run_species_visdiff_job(
     taxon_map = get_taxon_map()
     species_name = taxon_map.get(taxon_id, taxon_id)
 
+    # Match the convention used during training: backbone is None when its
+    # modality is not in the requested set (mirrors 07_fit.py logic).
+    lookup_image_backbone = image_backbone if "image" in modalities else None
+    lookup_sat_backbone = sat_backbone if "sat" in modalities else None
+
     try:
         (
             fit_path,
             resolved_modalities,
             resolved_image_backbone,
             resolved_sat_backbone,
-        ) = resolve_fit_results_path(taxon_id, modalities, image_backbone, sat_backbone)
+        ) = resolve_fit_results_path(taxon_id, modalities, lookup_image_backbone, lookup_sat_backbone)
     except FileNotFoundError as exc:
         logger.warning("Skipping %s (%s): %s", taxon_id, species_name, exc)
         return
