@@ -3,10 +3,7 @@
 # /// script
 # dependencies = [
 #     "mmocc",
-#     "earthengine-api==1.4.0",
-#     "omegaconf==2.3.0",
 #     "Pillow",
-#     "requests==2.32.5",
 #     "tqdm",
 #     "transformers",
 #     "setuptools<81"
@@ -15,11 +12,19 @@
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
-"""Extract GRAFT satellite embeddings for camera-trap locations."""
+"""Extract GRAFT satellite embeddings from pre-downloaded imagery.
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from datetime import datetime
+Uses the same pre-downloaded PNG images (keyed by loc_id) that step 08
+(VisDiff) consumes, rather than fetching patches from Earth Engine
+on-the-fly.  Supports both Sentinel-2 and NAIP imagery sources.
+
+GRAFT preprocessing follows the original paper (Mall et al., 2023):
+  1. Resize to 224×224
+  2. Normalize with CLIP ViT-B/16 statistics
+  3. Extract features using the GRAFT vision encoder
+  4. L2-normalize the embeddings
+"""
+
 from pathlib import Path
 
 import fire
@@ -38,72 +43,52 @@ from mmocc.graft_utils import (
     build_graft_transform,
     load_graft_model,
 )
-from mmocc.rs_graft import (
-    DEFAULT_CLOUD_PERCENT,
-    DEFAULT_TIME_WINDOW_DAYS,
-    SENTINEL_IMAGE_SIZE,
-    SENTINEL_PIXEL_SIZE_METERS,
-    fetch_sentinel_patch,
-)
 from mmocc.utils import get_submitit_executor
 
+# Maps imagery_source → PNG directory (mirrors step 08)
+IMAGERY_SOURCE_PNG_DIRS: dict[str, Path] = {
+    "sentinel": cache_path / "sat_wi_rgb_images_png",
+    "naip": cache_path / "naip_wi_images_png",
+}
 
-@dataclass(frozen=True)
-class ExtractSettings:
-    project: str
-    window_days: int
-    cloud_percent: float
-    image_size: int
-    pixel_size_meters: float
-
-
-def _fetch_patch(
-    idx: int, row: pd.Series, settings: ExtractSettings
-) -> tuple[int, np.ndarray | None]:
-    timestamp = row["Date_Time"]
-    if hasattr(timestamp, "to_pydatetime"):
-        ts = timestamp.to_pydatetime().isoformat()
-    else:
-        ts = datetime.fromisoformat(str(timestamp)).isoformat()
-    try:
-        patch = fetch_sentinel_patch(
-            latitude=float(row["Latitude"]),
-            longitude=float(row["Longitude"]),
-            timestamp=ts,
-            window_days=settings.window_days,
-            size=settings.image_size,
-            pixel_size_meters=settings.pixel_size_meters,
-            cloud_percent=settings.cloud_percent,
-            project=settings.project,
-        )
-        return idx, patch
-    except Exception as exc:
-        print(f"Failed to fetch Sentinel patch for index {idx}: {exc}")
-        return idx, None
+# Maps imagery_source → backbone name used in feature filenames.
+# Must match what load_data(sat_backbone_name=...) expects.
+IMAGERY_SOURCE_BACKBONE: dict[str, str] = {
+    "sentinel": "graft",
+    "naip": "graft_naip",
+}
 
 
 def extract_graft_features(
-    max_sites: int | None = None,
+    imagery_source: str = "sentinel",
+    image_size: int = GRAFT_DEFAULT_IMAGE_SIZE,
     batch_size: int = 32,
-    download_workers: int = 4,
-    project: str = "zorrilla",
-    window_days: int = DEFAULT_TIME_WINDOW_DAYS,
-    cloud_percent: float = DEFAULT_CLOUD_PERCENT,
-    image_size: int = SENTINEL_IMAGE_SIZE,
-    pixel_size_meters: float = SENTINEL_PIXEL_SIZE_METERS,
     skip_existing: bool = True,
 ):
-    df = pd.read_pickle(cache_path / "wi_blank_images.pkl").reset_index(drop=True)
-    if max_sites is not None:
-        df = df.head(max_sites).copy()
+    """Extract GRAFT embeddings from pre-downloaded PNG images.
+
+    Features are saved aligned with ``wi_blank_images.pkl`` row order —
+    matching the convention used by step 05 — so that ``load_data()``
+    can load them with the appropriate ``sat_backbone_name``.
+    """
+    png_dir = IMAGERY_SOURCE_PNG_DIRS.get(imagery_source)
+    if png_dir is None:
+        raise ValueError(
+            f"Unknown imagery_source '{imagery_source}'. "
+            f"Choose from: {sorted(IMAGERY_SOURCE_PNG_DIRS)}"
+        )
+    backbone_name = IMAGERY_SOURCE_BACKBONE[imagery_source]
+
+    # Load the same dataframe that step 05 uses, preserving row order
+    df = pd.read_pickle(cache_path / "wi_blank_images.pkl")
 
     output_path = cache_path / "features"
     output_path.mkdir(parents=True, exist_ok=True)
-    feature_file = output_path / "wi_blank_sat_features_graft_seasonal.npy"
-    id_file = output_path / "wi_blank_sat_features_graft_ids_seasonal.npy"
+    feature_file = output_path / f"wi_blank_sat_features_{backbone_name}.npy"
+    id_file = output_path / f"wi_blank_sat_features_{backbone_name}_ids.npy"
 
     if skip_existing and feature_file.exists() and id_file.exists():
-        print(f"GRAFT sat features already exist at {feature_file}, skipping.")
+        print(f"GRAFT {imagery_source} features already exist at {feature_file}, skipping.")
         return
 
     loc_ids = df["loc_id"].to_numpy()
@@ -113,63 +98,71 @@ def extract_graft_features(
     model = load_graft_model(GraftConfig(image_size=image_size), device=device)
     transform = build_graft_transform(image_size=image_size)
 
-    settings = ExtractSettings(
-        project=project,
-        window_days=window_days,
-        cloud_percent=cloud_percent,
-        image_size=image_size,
-        pixel_size_meters=pixel_size_meters,
-    )
+    # Build a lookup of loc_id → PNG path, checking existence once
+    unique_locs = df["loc_id"].unique()
+    png_paths: dict[str, Path] = {}
+    missing_count = 0
+    for lid in unique_locs:
+        p = png_dir / f"{lid}.png"
+        if p.exists():
+            png_paths[lid] = p
+        else:
+            missing_count += 1
 
-    num_rows = len(df)
-    for start in tqdm(range(0, num_rows, batch_size), desc="Batches"):
-        batch_df = df.iloc[start : start + batch_size]
-        patches: list[np.ndarray] = []
-        indices: list[int] = []
-        missing = 0
+    if missing_count:
+        print(
+            f"Warning: {missing_count}/{len(unique_locs)} loc_ids have no "
+            f"{imagery_source} PNG in {png_dir}"
+        )
 
-        with ThreadPoolExecutor(max_workers=download_workers) as executor:
-            futures = [
-                executor.submit(_fetch_patch, idx, row, settings)
-                for idx, row in batch_df.iterrows()
-            ]
-            for future in as_completed(futures):
-                idx, patch = future.result()
-                if patch is None:
-                    missing += 1
-                    continue
-                patches.append(patch)
-                indices.append(idx)
+    # Encode each unique loc_id once, then broadcast to all rows
+    locs_to_encode = [lid for lid in unique_locs if lid in png_paths]
+    loc_id_embeddings: dict[str, np.ndarray] = {}
 
-        if patches:
-            images = [
-                transform(Image.fromarray(patch.astype(np.uint8)))
-                for patch in patches
-            ]
+    for start in tqdm(
+        range(0, len(locs_to_encode), batch_size),
+        desc=f"GRAFT ({imagery_source})",
+    ):
+        batch_lids = locs_to_encode[start : start + batch_size]
+        images: list[torch.Tensor] = []
+        valid_lids: list[str] = []
+
+        for lid in batch_lids:
+            try:
+                img = Image.open(png_paths[lid]).convert("RGB")
+                images.append(transform(img))
+                valid_lids.append(lid)
+            except Exception as exc:
+                print(f"Failed to load {png_paths[lid]}: {exc}")
+
+        if images:
             batch_tensor = torch.stack(images, dim=0).to(device)
             with torch.inference_mode():
                 embeds = model.forward_features(batch_tensor).detach().cpu().numpy()
-            for idx, emb in zip(indices, embeds):
-                features[idx] = emb.astype(np.float32, copy=False)
+            for lid, emb in zip(valid_lids, embeds):
+                loc_id_embeddings[lid] = emb.astype(np.float32, copy=False)
 
-        if missing:
-            print(f"Warning: {missing} Sentinel patches missing in this batch.")
+    # Map embeddings back to all rows (same ordering as wi_blank_images.pkl)
+    for i, lid in enumerate(loc_ids):
+        if lid in loc_id_embeddings:
+            features[i] = loc_id_embeddings[lid]
+
+    valid_count = int(np.isfinite(features[:, 0]).sum())
+    print(
+        f"Extracted GRAFT features for {valid_count}/{len(df)} rows "
+        f"({len(loc_id_embeddings)} unique locs)"
+    )
 
     np.save(feature_file, features)
     np.save(id_file, loc_ids)
-    print(f"Wrote GRAFT sat features to {feature_file}")
+    print(f"Wrote GRAFT {imagery_source} features to {feature_file}")
 
 
 def main(
-    max_sites: int | None = None,
-    batch_size: int = 32,
-    download_workers: int = 4,
-    project: str = "zorrilla",
-    window_days: int = DEFAULT_TIME_WINDOW_DAYS,
-    cloud_percent: float = DEFAULT_CLOUD_PERCENT,
+    imagery_source: str = "sentinel",
     image_size: int = GRAFT_DEFAULT_IMAGE_SIZE,
-    pixel_size_meters: float = SENTINEL_PIXEL_SIZE_METERS,
-    skip_existing: bool = True,
+    batch_size: int = 32,
+    skip_existing: bool = False,
 ):
     executor = get_submitit_executor("extract_graft_features")
     executor.update_parameters(
@@ -179,14 +172,9 @@ def main(
 
     job = executor.submit(
         extract_graft_features,
-        max_sites=max_sites,
-        batch_size=batch_size,
-        download_workers=download_workers,
-        project=project,
-        window_days=window_days,
-        cloud_percent=cloud_percent,
+        imagery_source=imagery_source,
         image_size=image_size,
-        pixel_size_meters=pixel_size_meters,
+        batch_size=batch_size,
         skip_existing=skip_existing,
     )
 

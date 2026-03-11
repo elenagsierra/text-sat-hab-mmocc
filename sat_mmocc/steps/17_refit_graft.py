@@ -3,7 +3,6 @@
 # /// script
 # dependencies = [
 #     "mmocc",
-#     "earthengine-api==1.4.0",
 #     "transformers",
 # ]
 #
@@ -44,17 +43,44 @@ from mmocc.utils import (
     run_biolith_in_process,
 )
 
-GRAFT_SAT_BACKBONE = "graft"
-
-DESCRIPTOR_FILES: dict[str, Path] = {
-    "visdiff": cache_path / "visdiff_descriptions.csv",
-    "expert": cache_path / "expert_habitat_descriptions.csv",
+# Maps imagery_source → GRAFT feature backbone name (must match step 16 output)
+IMAGERY_SOURCE_GRAFT_BACKBONE: dict[str, str] = {
+    "sentinel": "graft",
+    "naip": "graft_naip",
 }
 
-DESCRIPTOR_LABELS: dict[str, str] = {
-    "visdiff": "graft_visdiff",
-    "expert": "graft_expert",
+# Imagery-source-aware VisDiff descriptor files (must match step 08 output)
+IMAGERY_SOURCE_VISDIFF_FILES: dict[str, Path] = {
+    "sentinel": cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv",
+    "naip": cache_path / "visdiff_sat_naip_wi_prompt2.csv",
 }
+
+# Expert descriptors are imagery-source-independent
+EXPERT_DESCRIPTOR_FILE = cache_path / "expert_habitat_descriptions.csv"
+
+
+def _get_descriptor_file(source: str, imagery_source: str) -> Path:
+    """Resolve the descriptor CSV path for a given source and imagery source."""
+    if source == "expert":
+        return EXPERT_DESCRIPTOR_FILE
+    if source == "visdiff":
+        path = IMAGERY_SOURCE_VISDIFF_FILES.get(imagery_source)
+        if path is None:
+            raise ValueError(
+                f"Unknown imagery_source '{imagery_source}' for visdiff descriptors. "
+                f"Choose from: {sorted(IMAGERY_SOURCE_VISDIFF_FILES)}"
+            )
+        return path
+    raise ValueError(f"Unknown descriptor source: {source}")
+
+
+def _get_descriptor_label(source: str, imagery_source: str) -> str:
+    """Return the sat_backbone label used in experiment filenames."""
+    if source == "expert":
+        return "graft_expert"
+    if source == "visdiff":
+        return f"graft_visdiff_{imagery_source}"
+    raise ValueError(f"Unknown descriptor source: {source}")
 
 
 @dataclass(frozen=True)
@@ -68,10 +94,15 @@ def normalize_rows(matrix: np.ndarray) -> np.ndarray:
     return matrix / norms
 
 
-def load_descriptor_table(source: str, require_valid: bool = False) -> pd.DataFrame:
-    df = pd.read_csv(DESCRIPTOR_FILES[source])
+def load_descriptor_table(
+    source: str,
+    require_valid: bool = False,
+    imagery_source: str = "sentinel",
+) -> pd.DataFrame:
+    path = _get_descriptor_file(source, imagery_source)
+    df = pd.read_csv(path)
     if "taxon_id" not in df or "difference" not in df:
-        raise ValueError(f"Descriptor file {DESCRIPTOR_FILES[source]} missing required columns")
+        raise ValueError(f"Descriptor file {path} missing required columns")
     df["taxon_id"] = df["taxon_id"].astype(str)
     if require_valid:
         df = df.dropna(subset=["difference"]).copy()
@@ -81,11 +112,14 @@ def load_descriptor_table(source: str, require_valid: bool = False) -> pd.DataFr
 
 
 def select_descriptors(
-    source: str, taxon_id: str, limit: int | None
+    source: str,
+    taxon_id: str,
+    limit: int | None,
+    imagery_source: str = "sentinel",
 ) -> tuple[list[str], np.ndarray]:
     if limit is not None and limit <= 0:
         return [], np.empty((0,), dtype=np.float32)
-    df = load_descriptor_table(source)
+    df = load_descriptor_table(source, imagery_source=imagery_source)
     subset = df[df["taxon_id"] == taxon_id].copy()
     if subset.empty:
         return [], np.empty((0,), dtype=np.float32)
@@ -134,6 +168,7 @@ def fit(
     descriptor_settings: DescriptorSettings,
     image_backbone_name: str,
     sat_backbone_data: str,
+    imagery_source: str = "sentinel",
 ):
     modalities_list = sorted(list(modalities))
     if "sat" not in modalities_list:
@@ -164,7 +199,8 @@ def fit(
     )
 
     descriptor_texts, descriptor_scores = select_descriptors(
-        descriptor_source, taxon_id, descriptor_settings.max_entries
+        descriptor_source, taxon_id, descriptor_settings.max_entries,
+        imagery_source=imagery_source,
     )
     if len(descriptor_texts) == 0:
         raise RuntimeError(
@@ -234,7 +270,7 @@ def fit(
         modality: modalities_pca[modality].n_components_ for modality in modalities_list
     }
 
-    sat_backbone_label = DESCRIPTOR_LABELS[descriptor_source]
+    sat_backbone_label = _get_descriptor_label(descriptor_source, imagery_source)
     species_results = dict(
         taxon_id=taxon_id,
         scientific_name=scientific_name,
@@ -310,6 +346,9 @@ def fit(
         pickle.dump(species_results, f)
 
 
+VALID_DESCRIPTOR_SOURCES = {"visdiff", "expert"}
+
+
 def parse_sources(value: Sequence[str] | str | None) -> list[str]:
     if value is None:
         return ["visdiff"]
@@ -317,7 +356,7 @@ def parse_sources(value: Sequence[str] | str | None) -> list[str]:
         candidates = [v.strip() for v in value.split(",") if v.strip()]
     else:
         candidates = list(value)
-    unknown = [v for v in candidates if v not in DESCRIPTOR_FILES]
+    unknown = [v for v in candidates if v not in VALID_DESCRIPTOR_SOURCES]
     if unknown:
         raise ValueError(f"Unknown descriptor sources requested: {unknown}")
     return sorted(set(candidates))
@@ -346,9 +385,10 @@ def main(
     descriptor_sources: Sequence[str] | str | None = None,
     modalities: Sequence[str] | str | None = None,
     image_backbone: str = default_image_backbone,
-    sat_backbone_data: str = GRAFT_SAT_BACKBONE,
+    sat_backbone_data: str | None = None,
     species: Sequence[str] | str | None = None,
     max_species: int | None = None,
+    imagery_source: str = "sentinel",
 ):
     descriptor_settings = {
         "visdiff": DescriptorSettings(max_entries=visdiff_limit),
@@ -363,11 +403,22 @@ def main(
     if max_species is not None:
         species_ids = species_ids[:max_species]
 
+    # Resolve the GRAFT feature backbone for this imagery source
+    if sat_backbone_data is None:
+        sat_backbone_data = IMAGERY_SOURCE_GRAFT_BACKBONE.get(imagery_source)
+        if sat_backbone_data is None:
+            raise ValueError(
+                f"Unknown imagery_source '{imagery_source}'. "
+                f"Choose from: {sorted(IMAGERY_SOURCE_GRAFT_BACKBONE)}"
+            )
+
     descriptor_species = {
         source: set(
-            load_descriptor_table(source, require_valid=True)[
-                "taxon_id"
-            ].unique().tolist()
+            load_descriptor_table(
+                source, require_valid=True, imagery_source=imagery_source
+            )["taxon_id"]
+            .unique()
+            .tolist()
         )
         for source in requested_sources
     }
@@ -380,7 +431,7 @@ def main(
                 if taxon_id not in descriptor_species[source]:
                     continue
 
-                sat_backbone_label = DESCRIPTOR_LABELS[source]
+                sat_backbone_label = _get_descriptor_label(source, imagery_source)
                 if skip_existing:
                     filename = experiment_to_filename(
                         taxon_id,
@@ -401,6 +452,7 @@ def main(
                         descriptor_settings[source],
                         image_backbone,
                         sat_backbone_data,
+                        imagery_source,
                     )
                 )
 
