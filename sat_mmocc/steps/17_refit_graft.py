@@ -4,6 +4,7 @@
 # dependencies = [
 #     "mmocc",
 #     "transformers",
+#     "setuptools<81"
 # ]
 #
 # [tool.uv.sources]
