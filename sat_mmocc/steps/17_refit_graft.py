@@ -4,6 +4,7 @@
 # dependencies = [
 #     "mmocc",
 #     "transformers",
+#     "wandb",
 #     "setuptools<81"
 # ]
 #
@@ -12,12 +13,13 @@
 # ///
 """Refit occupancy models using GRAFT satellite embeddings and VisDiff descriptions."""
 
+import math
 import os
 import pickle
 from dataclasses import dataclass
 from multiprocessing import Process, Queue
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import fire
 import numpy as np
@@ -346,8 +348,24 @@ def fit(
     with open(fit_results_path / filename, "wb") as f:
         pickle.dump(species_results, f)
 
+    # Return scalar metrics for the caller (e.g. main()) to log to W&B
+    return {
+        k: v
+        for k, v in species_results.items()
+        if isinstance(v, (str, int, float, bool))
+        and (not isinstance(v, float) or math.isfinite(v))
+    }
+
 
 VALID_DESCRIPTOR_SOURCES = {"visdiff", "expert"}
+
+
+def wandb_is_enabled() -> bool:
+    return (
+        os.getenv("WANDB_MODE", "").strip().lower() == "online"
+        and bool(os.getenv("VISDIFF_WANDB_ENTITY"))
+        and bool(os.getenv("VISDIFF_WANDB_PROJECT"))
+    )
 
 
 def parse_sources(value: Sequence[str] | str | None) -> list[str]:
@@ -365,7 +383,7 @@ def parse_sources(value: Sequence[str] | str | None) -> list[str]:
 
 def parse_modalities(value: Sequence[str] | str | None) -> list[str]:
     if value is None:
-        return ["image", "sat", "covariates"]
+        return ["sat", "covariates"]
     if isinstance(value, str):
         return [v.strip() for v in value.split(",") if v.strip()]
     return list(value)
@@ -457,16 +475,51 @@ def main(
                     )
                 )
 
+    wandb_rows: list[dict[str, Any]] = []
     for job in tqdm(
         submitit.helpers.as_completed(jobs), total=len(jobs), desc="Jobs", leave=False
     ):
         try:
-            job.result()
+            result = job.result()
+            if result is not None:
+                wandb_rows.append(result)
         except Exception as exc:
             print(f"Job {job.job_id} failed with error: {exc}")
             import traceback
 
             traceback.print_exc()
+
+    if wandb_rows and wandb_is_enabled():
+        import wandb
+
+        run = wandb.init(
+            entity=os.getenv("VISDIFF_WANDB_ENTITY"),
+            project=os.getenv("VISDIFF_WANDB_PROJECT"),
+            dir=str(cache_path / "wandb"),
+            mode=os.getenv("WANDB_MODE"),
+            job_type="refit_graft",
+            group="17_refit_graft",
+            config={
+                "modalities": modalities_list,
+                "descriptor_sources": requested_sources,
+                "image_backbone": image_backbone,
+                "sat_backbone_data": sat_backbone_data,
+                "imagery_source": imagery_source,
+                "num_species": len(species_ids),
+                "num_jobs": len(jobs),
+            },
+        )
+        try:
+            columns = sorted({k for row in wandb_rows for k in row})
+            table = wandb.Table(
+                columns=columns,
+                data=[[row.get(c) for c in columns] for row in wandb_rows],
+            )
+            run.log({"results": table, "num_completed": len(wandb_rows)})
+            run.summary["num_completed"] = len(wandb_rows)
+            run.summary["num_jobs"] = len(jobs)
+        finally:
+            run.finish()
 
 
 if __name__ == "__main__":

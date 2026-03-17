@@ -1,9 +1,11 @@
-"""Create a UMAP or t-SNE plot of CLIP embeddings for top habitat descriptors."""
+"""Create a UMAP or t-SNE plot of habitat descriptor embeddings."""
+
+from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,22 +17,22 @@ import umap
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
 
-from mmocc.config import (
-    cache_path,
+from sat_mmocc.analysis.satellite_experiments import (
+    get_descriptor_path,
+    load_species_ids,
+    parse_csv_list,
+)
+from sat_mmocc.config import (
     fig_page_width,
     figures_path,
     num_habitat_descriptions,
 )
-from mmocc.plot_utils import setup_matplotlib
-from mmocc.utils import get_focal_species_ids, get_scientific_taxon_map
+from sat_mmocc.plot_utils import setup_matplotlib
+from sat_mmocc.utils import get_scientific_taxon_map
 
 CLIP_MODEL_NAME = "ViT-bigG-14"
 CLIP_PRETRAINED = "laion2b_s39b_b160k"
-
-DESCRIPTOR_PATHS: Dict[str, Path] = {
-    "VisDiff": cache_path / "visdiff_descriptions.csv",
-    "Expert": cache_path / "expert_habitat_descriptions.csv",
-}
+DISPLAY_NAMES = {"visdiff": "VisDiff", "expert": "Expert"}
 
 
 @dataclass(frozen=True)
@@ -83,8 +85,8 @@ def get_text_encoder() -> ClipTextEncoder:
 def _clean_descriptors(df: pd.DataFrame, limit: int) -> pd.DataFrame:
     df = df.copy()
     df["taxon_id"] = df["taxon_id"].astype(str)
-    df["difference"] = df["difference"].astype(str).str.strip()
     df = df.dropna(subset=["taxon_id", "difference", "auroc"])
+    df["difference"] = df["difference"].astype(str).str.strip()
     df = df[df["difference"] != ""]
     df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False])
     df = df.drop_duplicates(subset=["taxon_id", "difference"])
@@ -96,10 +98,11 @@ def load_descriptors(
     focal_ids: Sequence[str],
     taxon_map: Dict[str, str],
     descriptor_limit: int,
+    descriptor_paths: Mapping[str, Path],
 ) -> list[DescriptorRow]:
     rows: list[DescriptorRow] = []
     focal_id_set = set(focal_ids)
-    for source, path in DESCRIPTOR_PATHS.items():
+    for source, path in descriptor_paths.items():
         if not path.exists():
             raise FileNotFoundError(f"Missing descriptor cache at {path}")
         raw = pd.read_csv(path)
@@ -114,7 +117,7 @@ def load_descriptors(
                 DescriptorRow(
                     taxon_id=taxon_id,
                     species_name=name,
-                    source=source,
+                    source=DISPLAY_NAMES[source],
                     description=str(row["difference"]),
                     score=float(row["auroc"]),
                 )
@@ -238,13 +241,61 @@ def compute_tsne_embeddings(texts: Sequence[str]) -> np.ndarray:
     return tsne.fit_transform(embeddings)
 
 
+def resolve_descriptor_paths(
+    descriptor_sources: Sequence[str],
+    imagery_source: str,
+    visdiff_path: str | Path | None,
+    expert_path: str | Path | None,
+) -> dict[str, Path]:
+    overrides = {"visdiff": visdiff_path, "expert": expert_path}
+    resolved: dict[str, Path] = {}
+    for source in descriptor_sources:
+        resolved[source] = get_descriptor_path(
+            source,
+            imagery_source=imagery_source,
+            override=overrides[source],
+        )
+    return resolved
+
+
+def parse_descriptor_sources(value: str | Sequence[str] | None) -> list[str]:
+    sources = parse_csv_list(value) or ["visdiff", "expert"]
+    invalid = [source for source in sources if source not in DISPLAY_NAMES]
+    if invalid:
+        raise ValueError(
+            f"Unknown descriptor sources {invalid}. "
+            f"Choose from: {sorted(DISPLAY_NAMES)}"
+        )
+    return sources
+
+
 def main(
-    descriptor_limit: int = num_habitat_descriptions, method: str = "umap"
+    descriptor_limit: int = num_habitat_descriptions,
+    method: str = "umap",
+    descriptor_sources: Sequence[str] | str | None = None,
+    imagery_source: str = "sentinel",
+    visdiff_path: str | Path | None = None,
+    expert_path: str | Path | None = None,
+    species_ids: Sequence[str] | str | None = None,
+    species_ids_file: str | Path | None = None,
+    output_stem: str | None = None,
 ) -> None:
     setup_matplotlib()
-    focal_ids = get_focal_species_ids()
+    focal_ids = load_species_ids(species_ids, species_ids_file)
     taxon_map = get_scientific_taxon_map()
-    descriptors = load_descriptors(focal_ids, taxon_map, descriptor_limit)
+    selected_sources = parse_descriptor_sources(descriptor_sources)
+    descriptor_paths = resolve_descriptor_paths(
+        selected_sources,
+        imagery_source,
+        visdiff_path,
+        expert_path,
+    )
+    descriptors = load_descriptors(
+        focal_ids,
+        taxon_map,
+        descriptor_limit,
+        descriptor_paths,
+    )
     texts = [d.description for d in descriptors]
     method = method.lower()
     if method == "umap":
@@ -255,8 +306,9 @@ def main(
         raise ValueError(f"Unknown method '{method}'. Use 'umap' or 'tsne'.")
     color_map = build_color_map(d.species_name for d in descriptors)
     fig = plot_umap(coords, descriptors, color_map)
-    output_png = figures_path / f"habitat_covariates_{method}.png"
-    output_pdf = figures_path / f"habitat_covariates_{method}.pdf"
+    stem = output_stem or f"habitat_covariates_{method}"
+    output_png = figures_path / f"{stem}.png"
+    output_pdf = figures_path / f"{stem}.pdf"
     output_png.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_png, bbox_inches="tight", dpi=300)
     fig.savefig(output_pdf, bbox_inches="tight")
@@ -280,5 +332,57 @@ if __name__ == "__main__":
         choices=["umap", "tsne"],
         help="Dimensionality reduction method.",
     )
+    parser.add_argument(
+        "--descriptor-sources",
+        type=str,
+        default="visdiff,expert",
+        help="Comma-separated descriptor sources to include: visdiff, expert.",
+    )
+    parser.add_argument(
+        "--imagery-source",
+        type=str,
+        default="sentinel",
+        help="Imagery source for VisDiff descriptors: sentinel or naip.",
+    )
+    parser.add_argument(
+        "--visdiff-path",
+        type=Path,
+        default=None,
+        help="Optional override for the VisDiff descriptor CSV.",
+    )
+    parser.add_argument(
+        "--expert-path",
+        type=Path,
+        default=None,
+        help="Optional override for the expert descriptor CSV.",
+    )
+    parser.add_argument(
+        "--species-ids",
+        type=str,
+        default=None,
+        help="Optional comma-separated taxon IDs. Defaults to focal species.",
+    )
+    parser.add_argument(
+        "--species-ids-file",
+        type=Path,
+        default=None,
+        help="Optional text file containing comma- or newline-separated taxon IDs.",
+    )
+    parser.add_argument(
+        "--output-stem",
+        type=str,
+        default=None,
+        help="Optional output filename stem under FIGURES_PATH.",
+    )
     args = parser.parse_args()
-    main(descriptor_limit=args.descriptor_limit, method=args.method)
+    main(
+        descriptor_limit=args.descriptor_limit,
+        method=args.method,
+        descriptor_sources=args.descriptor_sources,
+        imagery_source=args.imagery_source,
+        visdiff_path=args.visdiff_path,
+        expert_path=args.expert_path,
+        species_ids=args.species_ids,
+        species_ids_file=args.species_ids_file,
+        output_stem=args.output_stem,
+    )
