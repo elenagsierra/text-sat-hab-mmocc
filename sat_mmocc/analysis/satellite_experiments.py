@@ -39,16 +39,22 @@ VALID_DESCRIPTOR_SOURCES = frozenset({"visdiff", "expert"})
 IMAGERY_SOURCE_PNG_DIRS: dict[str, Path] = {
     "sentinel": cache_path / "sat_wi_rgb_images_png",
     "naip": cache_path / "naip_wi_images_png",
+    "sentinel_v_graft": cache_path / "sentinel_v_graft_images_png",
+    "naip_v_graft": cache_path / "naip_v_graft_images_png",
 }
 
 IMAGERY_SOURCE_VISDIFF_FILES: dict[str, Path] = {
     "sentinel": cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv",
     "naip": cache_path / "visdiff_sat_naip_wi_prompt2.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions.csv",
 }
 
 IMAGERY_SOURCE_GRAFT_FEATURE_BACKBONES: dict[str, str] = {
     "sentinel": "graft",
     "naip": "graft_naip",
+    "sentinel_v_graft": "graft_sentinel_v_graft",
+    "naip_v_graft": "graft_naip_v_graft",
 }
 
 EXPERT_DESCRIPTOR_FILE = cache_path / "expert_habitat_descriptions.csv"

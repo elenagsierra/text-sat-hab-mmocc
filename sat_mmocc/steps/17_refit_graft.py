@@ -50,12 +50,16 @@ from mmocc.utils import (
 IMAGERY_SOURCE_GRAFT_BACKBONE: dict[str, str] = {
     "sentinel": "graft",
     "naip": "graft_naip",
+    "sentinel_v_graft": "graft_sentinel_v_graft",
+    "naip_v_graft": "graft_naip_v_graft",
 }
 
 # Imagery-source-aware VisDiff descriptor files (must match step 08 output)
 IMAGERY_SOURCE_VISDIFF_FILES: dict[str, Path] = {
     "sentinel": cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv",
     "naip": cache_path / "visdiff_sat_naip_wi_prompt2.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions.csv",
 }
 
 # Expert descriptors are imagery-source-independent

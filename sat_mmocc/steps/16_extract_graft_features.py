@@ -16,7 +16,8 @@
 
 Uses the same pre-downloaded PNG images (keyed by loc_id) that step 08
 (VisDiff) consumes, rather than fetching patches from Earth Engine
-on-the-fly.  Supports both Sentinel-2 and NAIP imagery sources.
+on-the-fly.  Supports both standard and v_graft Sentinel-2 / NAIP imagery
+sources.
 
 GRAFT preprocessing follows the original paper (Mall et al., 2023):
   1. Resize to 224×224
@@ -49,6 +50,8 @@ from mmocc.utils import get_submitit_executor
 IMAGERY_SOURCE_PNG_DIRS: dict[str, Path] = {
     "sentinel": cache_path / "sat_wi_rgb_images_png",
     "naip": cache_path / "naip_wi_images_png",
+    "sentinel_v_graft": cache_path / "sentinel_v_graft_images_png",
+    "naip_v_graft": cache_path / "naip_v_graft_images_png",
 }
 
 # Maps imagery_source → backbone name used in feature filenames.
@@ -56,6 +59,8 @@ IMAGERY_SOURCE_PNG_DIRS: dict[str, Path] = {
 IMAGERY_SOURCE_BACKBONE: dict[str, str] = {
     "sentinel": "graft",
     "naip": "graft_naip",
+    "sentinel_v_graft": "graft_sentinel_v_graft",
+    "naip_v_graft": "graft_naip_v_graft",
 }
 
 
@@ -96,6 +101,8 @@ def extract_graft_features(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_graft_model(GraftConfig(image_size=image_size), device=device)
+    # The v_graft download scripts already apply source-specific scaling so the
+    # PNGs stay viewable; step 16 keeps CLIP normalization here for all sources.
     transform = build_graft_transform(image_size=image_size)
 
     # Build a lookup of loc_id → PNG path, checking existence once
