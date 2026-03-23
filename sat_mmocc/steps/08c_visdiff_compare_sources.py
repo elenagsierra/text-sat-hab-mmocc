@@ -65,7 +65,6 @@ from sat_mmocc.config import (
 from sat_mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
-    load_image_lookup,
     rank_image_groups,
     resolve_fit_results_path,
 )
@@ -80,9 +79,7 @@ DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_wi_prompt2.csv"
 DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sat_wi_prompt2.csv"
 DEFAULT_GROUND_CSV = cache_path / "visdiff_descriptions.csv"
 DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_naipwi_figures"
-
-NAIP_PNG_DIR = cache_path / "naip_wi_images_png"
-SENTINEL_PNG_DIR = cache_path / "sat_wi_rgb_images_png"
+DEFAULT_PAIRING_CSV = cache_path / "camera_satellite_pairings_v_graft.csv"
 
 MODALITIES = ["image", "sat", "covariates"]
 TOP_K = 50
@@ -241,7 +238,7 @@ def _plot_hypotheses(
 
 def _get_satellite_groups(
     taxon_id: str,
-    png_dir: Path,
+    image_lookup: pd.DataFrame,
     modalities: List[str],
     image_backbone: str,
     sat_backbone: str,
@@ -261,12 +258,9 @@ def _get_satellite_groups(
 
     fit_results = load_fit_results(fit_path)
     site_scores, display_name = compute_site_scores(tid, res_mod, res_img, res_sat, fit_results)
-    site_scores["image_path"] = site_scores["loc_id"].apply(
-        lambda lid: str(png_dir / f"{lid}.png")
-    )
-    site_scores["image_exists"] = site_scores["image_path"].apply(
-        lambda p: Path(p).exists()
-    )
+    site_scores = site_scores.join(image_lookup, on="loc_id", how="left")
+    site_scores["image_exists"] = site_scores["image_exists"].fillna(False).astype(bool)
+    site_scores["image_path"] = site_scores["image_path"].fillna("").astype(str)
 
     pos_df, neg_df = rank_image_groups(
         site_scores,
@@ -292,8 +286,8 @@ def _get_ground_groups(
 ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame, str]]:
     """Load ground-level (camera-trap) fit results and return (pos_df, neg_df, display_name).
 
-    Camera-trap images are resolved via *image_lookup* (indexed by loc_id, from
-    ``load_image_lookup()``), which maps each site to its blank camera-trap image path.
+    Camera-trap images are resolved via *image_lookup* indexed by loc_id, built
+    from the pairing manifest so each displayed site maps to an explicit triplet.
     Ranking uses ``image_modality="image"`` so that the image-modality score drives
     selection, matching how ``08_visdiff.py`` selects images for VisDiff.
     """
@@ -371,20 +365,75 @@ def _resolve_shared_locations(
 
 # ── Image-path mapping ─────────────────────────────────────────────────────────
 
+def _load_pairing_manifest(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"Pairing manifest not found: {path}")
+    df = pd.read_csv(path)
+    required = {
+        "loc_id",
+        "ground_date_time",
+        "Latitude",
+        "Longitude",
+        "ground_image_path",
+        "ground_image_exists",
+        "sentinel_image_path",
+        "sentinel_exists",
+        "naip_image_path",
+        "naip_exists",
+    }
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(f"Pairing manifest {path} missing required columns: {missing}")
+
+    df["loc_id"] = df["loc_id"].astype(str)
+    df["ground_date_time"] = pd.to_datetime(df["ground_date_time"], errors="coerce")
+    for path_col, exists_col in [
+        ("ground_image_path", "ground_image_exists"),
+        ("sentinel_image_path", "sentinel_exists"),
+        ("naip_image_path", "naip_exists"),
+    ]:
+        df[path_col] = df[path_col].fillna("").astype(str)
+        if exists_col in df.columns:
+            df[exists_col] = df[exists_col].fillna(False).astype(bool)
+        else:
+            df[exists_col] = df[path_col].apply(lambda p: Path(p).exists() if p else False)
+    return df
+
+
+def _build_complete_triplet_lookup(
+    pairing_df: pd.DataFrame,
+    path_column: str,
+    exists_column: str,
+) -> pd.DataFrame:
+    subset = pairing_df.copy()
+    subset = subset[
+        subset["ground_image_exists"]
+        & subset["sentinel_exists"]
+        & subset["naip_exists"]
+    ].copy()
+    subset = subset[subset[path_column].astype(str).str.strip() != ""]
+    subset = subset.sort_values("ground_date_time", na_position="last")
+    subset = subset.drop_duplicates(subset="loc_id", keep="first")
+    if subset.empty:
+        return pd.DataFrame(columns=["image_path", "image_exists", "Latitude", "Longitude"])
+    lookup = subset.set_index("loc_id")[[path_column, exists_column, "Latitude", "Longitude"]].rename(
+        columns={path_column: "image_path", exists_column: "image_exists"}
+    )
+    return lookup[["image_path", "image_exists", "Latitude", "Longitude"]]
+
+
+def _lookup_to_path_map(image_lookup: pd.DataFrame) -> Dict[str, str]:
+    if image_lookup.empty or "image_path" not in image_lookup.columns:
+        return {}
+    return {str(lid): str(row["image_path"]) for lid, row in image_lookup.iterrows()}
+
+
 def _paths_for_source(
     loc_ids: List[str],
     df: pd.DataFrame,
-    fallback_dir: Optional[Path] = None,
     fallback_lookup: Optional[Dict[str, str]] = None,
 ) -> List[str]:
-    """Map *loc_ids* → image paths, in loc_id order, from a ranked DataFrame.
-
-    Resolution order for each loc_id:
-      1. ``df["image_path"]`` — from the ranked DataFrame (most specific)
-      2. ``fallback_dir / <loc_id>.png`` — for satellite sources
-      3. ``fallback_lookup[loc_id]`` — for camera-trap sources via image_lookup
-      4. ``""`` — genuinely missing, renders as "missing" placeholder
-    """
+    """Map *loc_ids* → image paths, in loc_id order, from a ranked DataFrame."""
     loc_to_path: Dict[str, str] = {}
     if not df.empty and "image_path" in df.columns:
         for _, row in df.iterrows():
@@ -396,8 +445,6 @@ def _paths_for_source(
     for lid in loc_ids:
         if lid in loc_to_path:
             result.append(loc_to_path[lid])
-        elif fallback_dir is not None:
-            result.append(str(fallback_dir / f"{lid}.png"))
         elif fallback_lookup is not None and lid in fallback_lookup:
             result.append(fallback_lookup[lid])
         else:
@@ -412,9 +459,9 @@ def generate_comparison_figure(
     naip_visdiff_df: pd.DataFrame,
     sentinel_visdiff_df: pd.DataFrame,
     ground_visdiff_df: pd.DataFrame,
-    image_lookup: pd.DataFrame,
-    naip_png_dir: Path,
-    sentinel_png_dir: Path,
+    naip_lookup: pd.DataFrame,
+    sentinel_lookup: pd.DataFrame,
+    ground_lookup: pd.DataFrame,
     modalities: List[str] = MODALITIES,
     image_backbone: str = default_image_backbone,
     naip_sat_backbone: str = default_sat_backbone,
@@ -429,9 +476,9 @@ def generate_comparison_figure(
     """Return a 3-source comparison figure, or None if all sources fail."""
     tid = str(taxon_id)
 
-    naip_result     = _get_satellite_groups(tid, naip_png_dir, modalities, image_backbone, naip_sat_backbone, top_k, unique_weight, mode)
-    sentinel_result = _get_satellite_groups(tid, sentinel_png_dir, modalities, image_backbone, sentinel_sat_backbone, top_k, unique_weight, mode)
-    ground_result   = _get_ground_groups(tid, image_lookup, modalities, image_backbone, naip_sat_backbone, top_k, unique_weight, mode)
+    naip_result = _get_satellite_groups(tid, naip_lookup, modalities, image_backbone, naip_sat_backbone, top_k, unique_weight, mode)
+    sentinel_result = _get_satellite_groups(tid, sentinel_lookup, modalities, image_backbone, sentinel_sat_backbone, top_k, unique_weight, mode)
+    ground_result = _get_ground_groups(tid, ground_lookup, modalities, image_backbone, naip_sat_backbone, top_k, unique_weight, mode)
 
     if naip_result is None and sentinel_result is None and ground_result is None:
         LOGGER.warning("Skipping %s — no fit results for any source.", tid)
@@ -461,21 +508,17 @@ def generate_comparison_figure(
     )
 
     # ── Build image path lists per source (all referencing same locations) ─────
-    # Build a loc_id → camera-trap path lookup directly from image_lookup so
-    # that even sites filtered out of gnd_pos/neg_df (e.g. low-ranked or below
-    # the fallback threshold) still resolve to a real image path.
-    cam_lookup: Dict[str, str] = {}
-    if not image_lookup.empty and "image_path" in image_lookup.columns:
-        for lid, irow in image_lookup.iterrows():
-            cam_lookup[str(lid)] = str(irow["image_path"])
+    naip_path_lookup = _lookup_to_path_map(naip_lookup)
+    sentinel_path_lookup = _lookup_to_path_map(sentinel_lookup)
+    ground_path_lookup = _lookup_to_path_map(ground_lookup)
 
-    naip_pos_paths  = _paths_for_source(shared_pos_locs, naip_pos_df,  naip_png_dir)
-    sent_pos_paths  = _paths_for_source(shared_pos_locs, sent_pos_df,  sentinel_png_dir)
-    gnd_pos_paths   = _paths_for_source(shared_pos_locs, gnd_pos_df,   None, fallback_lookup=cam_lookup)
+    naip_pos_paths = _paths_for_source(shared_pos_locs, naip_pos_df, naip_path_lookup)
+    sent_pos_paths = _paths_for_source(shared_pos_locs, sent_pos_df, sentinel_path_lookup)
+    gnd_pos_paths = _paths_for_source(shared_pos_locs, gnd_pos_df, ground_path_lookup)
 
-    naip_neg_paths  = _paths_for_source(shared_neg_locs, naip_neg_df,  naip_png_dir)
-    sent_neg_paths  = _paths_for_source(shared_neg_locs, sent_neg_df,  sentinel_png_dir)
-    gnd_neg_paths   = _paths_for_source(shared_neg_locs, gnd_neg_df,   None, fallback_lookup=cam_lookup)
+    naip_neg_paths = _paths_for_source(shared_neg_locs, naip_neg_df, naip_path_lookup)
+    sent_neg_paths = _paths_for_source(shared_neg_locs, sent_neg_df, sentinel_path_lookup)
+    gnd_neg_paths = _paths_for_source(shared_neg_locs, gnd_neg_df, ground_path_lookup)
 
     # ── Figure layout ──────────────────────────────────────────────────────────
     #  columns: [image grid (6 rows)] | [NAIP hyp] | [Sentinel hyp] | [Ground hyp]
@@ -532,8 +575,7 @@ def main(
     naip_csv: str | Path = DEFAULT_NAIP_CSV,
     sentinel_csv: str | Path = DEFAULT_SENTINEL_CSV,
     ground_csv: str | Path = DEFAULT_GROUND_CSV,
-    naip_png_dir: str | Path = NAIP_PNG_DIR,
-    sentinel_png_dir: str | Path = SENTINEL_PNG_DIR,
+    pairing_csv: str | Path = DEFAULT_PAIRING_CSV,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     fmt: str = "png",
     species_ids: Sequence[str] | str | None = None,
@@ -557,8 +599,7 @@ def main(
     naip_csv:              Path to NAIP VisDiff descriptions CSV.
     sentinel_csv:          Path to Sentinel VisDiff descriptions CSV.
     ground_csv:            Path to ground-level (camera-trap) VisDiff descriptions CSV.
-    naip_png_dir:          Directory of NAIP PNG images named <loc_id>.png.
-    sentinel_png_dir:      Directory of Sentinel PNG images named <loc_id>.png.
+    pairing_csv:           Pairing manifest linking one camera image to one Sentinel and one NAIP image.
     output_dir:            Output directory (created if needed).
     fmt:                   "png" or "pdf".
     species_ids:           Comma-separated taxon IDs, or omit for all species in CSVs.
@@ -577,12 +618,11 @@ def main(
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    naip_csv        = Path(naip_csv)
-    sentinel_csv    = Path(sentinel_csv)
-    ground_csv      = Path(ground_csv)
-    naip_png_dir    = Path(naip_png_dir)
-    sentinel_png_dir= Path(sentinel_png_dir)
-    output_dir      = Path(output_dir)
+    naip_csv = Path(naip_csv)
+    sentinel_csv = Path(sentinel_csv)
+    ground_csv = Path(ground_csv)
+    pairing_csv = Path(pairing_csv)
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mod_list = [m.strip() for m in modalities.split(",") if m.strip()]
@@ -590,6 +630,7 @@ def main(
     LOGGER.info("Loading NAIP CSV:     %s", naip_csv)
     LOGGER.info("Loading Sentinel CSV: %s", sentinel_csv)
     LOGGER.info("Loading Ground CSV:   %s", ground_csv)
+    LOGGER.info("Loading pairing CSV:  %s", pairing_csv)
 
     def _load_visdiff(path: Path) -> pd.DataFrame:
         if not path.exists():
@@ -617,14 +658,16 @@ def main(
     else:
         focal_ids = list(species_ids)
 
-    LOGGER.info("Loading camera-trap image lookup …")
-    try:
-        image_lookup = load_image_lookup()
-    except Exception as exc:
-        LOGGER.warning("Could not load camera-trap image lookup: %s — ground imagery disabled.", exc)
-        image_lookup = pd.DataFrame(
-            columns=["image_path", "image_exists", "Latitude", "Longitude"]
-        )
+    pairing_manifest = _load_pairing_manifest(pairing_csv)
+    naip_lookup = _build_complete_triplet_lookup(
+        pairing_manifest, "naip_image_path", "naip_exists"
+    )
+    sentinel_lookup = _build_complete_triplet_lookup(
+        pairing_manifest, "sentinel_image_path", "sentinel_exists"
+    )
+    ground_lookup = _build_complete_triplet_lookup(
+        pairing_manifest, "ground_image_path", "ground_image_exists"
+    )
 
     taxon_map = get_taxon_map()
     LOGGER.info(
@@ -651,9 +694,9 @@ def main(
                 naip_visdiff_df=naip_visdiff,
                 sentinel_visdiff_df=sentinel_visdiff,
                 ground_visdiff_df=ground_visdiff,
-                image_lookup=image_lookup,
-                naip_png_dir=naip_png_dir,
-                sentinel_png_dir=sentinel_png_dir,
+                naip_lookup=naip_lookup,
+                sentinel_lookup=sentinel_lookup,
+                ground_lookup=ground_lookup,
                 modalities=mod_list,
                 image_backbone=image_backbone,
                 naip_sat_backbone=naip_sat_backbone,

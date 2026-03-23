@@ -18,17 +18,16 @@
 # ///
 """Download Sentinel-2 patches prepared for GRAFT, while keeping PNGs viewable.
 
-This variant:
-  1. selects the temporally closest Sentinel-2 image for each location,
-  2. requires <=1% scene cloud and <=1% cloud over the requested patch,
-  3. saves B4/B3/B2 RGB PNGs after divide-by-3000 and clip-to-[0, 1],
-  4. leaves CLIP normalization to sat_mmocc/steps/16_extract_graft_features.py.
+This variant now pairs one Sentinel-2 image to each camera-trap row and records
+that association in a shared manifest for step 08c.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from hashlib import sha1
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import ee
 import fire
@@ -39,7 +38,7 @@ from joblib import Memory
 from PIL import Image
 from tqdm import tqdm
 
-from mmocc.config import cache_path
+from mmocc.config import cache_path, wi_image_path
 
 SENTINEL_DATASET = "COPERNICUS/S2_SR_HARMONIZED"
 S2_CLOUD_PROBABILITY_DATASET = "COPERNICUS/S2_CLOUD_PROBABILITY"
@@ -50,6 +49,28 @@ DEFAULT_CLOUD_PERCENT = 1.0
 DEFAULT_MAX_PATCH_CLOUD_FRACTION = 0.01
 DEFAULT_ARCHIVE_START = "2015-01-01"
 S2_CLOUD_PROBABILITY_THRESHOLD = 50
+PAIRING_CSV = cache_path / "camera_satellite_pairings_v_graft.csv"
+
+MANIFEST_COLUMNS = [
+    "pair_id",
+    "FilePath",
+    "loc_id",
+    "ground_date_time",
+    "Latitude",
+    "Longitude",
+    "ground_image_path",
+    "ground_image_exists",
+    "sentinel_image_path",
+    "sentinel_exists",
+    "sentinel_source_datetime",
+    "sentinel_days_offset",
+    "sentinel_scene_cloud_percent",
+    "sentinel_patch_cloud_fraction",
+    "naip_image_path",
+    "naip_exists",
+    "naip_source_datetime",
+    "naip_days_offset",
+]
 
 _MEMORY = Memory(cache_path / "sentinel_wi_rgb_v_graft_cache", verbose=0)
 _EE_PROJECT: str | None = None
@@ -66,8 +87,37 @@ def _initialize_ee(project: str | None = None) -> None:
     _EE_PROJECT = project
 
 
+def _make_pair_id(filepath: str) -> str:
+    return sha1(filepath.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_ground_rows(max_rows: int | None = None) -> pd.DataFrame:
+    df = pd.read_pickle(cache_path / "wi_blank_images.pkl").reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError("No cached Wildlife Insights blank images found.")
+    if max_rows is not None:
+        df = df.head(max_rows).copy()
+    df["FilePath"] = df["FilePath"].astype(str)
+    df["pair_id"] = df["FilePath"].apply(_make_pair_id)
+    df["ground_date_time"] = pd.to_datetime(df["Date_Time"], errors="coerce")
+    df["ground_image_path"] = df["FilePath"].str.replace(
+        "gs://", f"{wi_image_path}/", n=1
+    )
+    df["ground_image_exists"] = df["ground_image_path"].apply(lambda p: Path(p).exists())
+    return df
+
+
 def _parse_date(value: str) -> date:
     return datetime.fromisoformat(value).date()
+
+
+def _millis_to_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value) / 1000.0, tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
 
 
 def _download_thumb(
@@ -193,7 +243,7 @@ def _fetch_patch_cached(
     project: str | None,
     dataset: str,
     archive_start: str,
-) -> np.ndarray | None:
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
     _initialize_ee(project=project)
     target_date = _parse_date(timestamp)
     point = ee.Geometry.Point([float(longitude), float(latitude)])
@@ -211,16 +261,28 @@ def _fetch_patch_cached(
         archive_start=archive_start,
     )
     if collection.size().getInfo() == 0:
-        return None
+        return None, None
 
-    image = (
-        ee.Image(collection.first())
-        .select(list(SENTINEL_RGB_BANDS))
-        .divide(3000)
-        .clamp(0, 1)
-        .unmask(0)
-    )
-    return _download_thumb(image, region, size)
+    first = ee.Image(collection.first())
+    props = first.toDictionary(
+        [
+            "system:time_start",
+            "days_from_target",
+            "patch_cloud_fraction",
+            "CLOUDY_PIXEL_PERCENTAGE",
+        ]
+    ).getInfo()
+    image = first.select(list(SENTINEL_RGB_BANDS)).divide(3000).clamp(0, 1).unmask(0)
+    arr = _download_thumb(image, region, size)
+    if arr is None:
+        return None, None
+    payload = {
+        "sentinel_source_datetime": _millis_to_iso(props.get("system:time_start")),
+        "sentinel_days_offset": float(props.get("days_from_target")) if props.get("days_from_target") is not None else None,
+        "sentinel_scene_cloud_percent": float(props.get("CLOUDY_PIXEL_PERCENTAGE")) if props.get("CLOUDY_PIXEL_PERCENTAGE") is not None else None,
+        "sentinel_patch_cloud_fraction": float(props.get("patch_cloud_fraction")) if props.get("patch_cloud_fraction") is not None else None,
+    }
+    return arr, payload
 
 
 def _process_row(
@@ -234,9 +296,9 @@ def _process_row(
     project: str | None,
     dataset: str,
     archive_start: str,
-) -> tuple[int, str]:
+) -> tuple[int, str, dict[str, Any]]:
     if dest.exists():
-        return row_idx, "skipped"
+        return row_idx, "skipped", {"pair_id": row["pair_id"]}
 
     timestamp = row["Date_Time"]
     if hasattr(timestamp, "to_pydatetime"):
@@ -245,7 +307,7 @@ def _process_row(
         ts = datetime.fromisoformat(str(timestamp)).isoformat()
 
     try:
-        arr = _fetch_patch_cached(
+        arr, payload = _fetch_patch_cached(
             latitude=float(row["Latitude"]),
             longitude=float(row["Longitude"]),
             timestamp=ts,
@@ -259,15 +321,80 @@ def _process_row(
         )
     except Exception as exc:
         print(f"\n[row {row_idx}] fetch failed: {exc}")
-        return row_idx, "failed"
+        return row_idx, "failed", {"pair_id": row["pair_id"]}
 
-    if arr is None:
+    if arr is None or payload is None:
         print(f"\n[row {row_idx}] no qualifying Sentinel imagery found, skipping.")
-        return row_idx, "failed"
+        return row_idx, "failed", {"pair_id": row["pair_id"]}
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(arr).save(dest)
-    return row_idx, "saved"
+    payload["pair_id"] = row["pair_id"]
+    return row_idx, "saved", payload
+
+
+def _merge_manifest(existing: pd.DataFrame | None, updated: pd.DataFrame) -> pd.DataFrame:
+    updated = updated.set_index("pair_id")
+    if existing is not None and not existing.empty:
+        existing = existing.copy()
+        existing["pair_id"] = existing["pair_id"].astype(str)
+        merged = updated.combine_first(existing.set_index("pair_id"))
+    else:
+        merged = updated
+    merged = merged.reset_index()
+    for col in MANIFEST_COLUMNS:
+        if col not in merged.columns:
+            merged[col] = None
+    return merged[MANIFEST_COLUMNS].sort_values(["ground_date_time", "pair_id"], na_position="last")
+
+
+def _write_manifest(
+    df: pd.DataFrame,
+    out_root: Path,
+    updates: list[dict[str, Any]],
+    manifest_path: Path,
+) -> None:
+    base = pd.DataFrame(
+        {
+            "pair_id": df["pair_id"],
+            "FilePath": df["FilePath"],
+            "loc_id": df["loc_id"],
+            "ground_date_time": df["ground_date_time"],
+            "Latitude": df["Latitude"],
+            "Longitude": df["Longitude"],
+            "ground_image_path": df["ground_image_path"],
+            "ground_image_exists": df["ground_image_exists"],
+            "sentinel_image_path": df["pair_id"].apply(lambda pid: str(out_root / f"{pid}.png")),
+            "sentinel_exists": df["pair_id"].apply(lambda pid: (out_root / f"{pid}.png").exists()),
+            "sentinel_source_datetime": None,
+            "sentinel_days_offset": None,
+            "sentinel_scene_cloud_percent": None,
+            "sentinel_patch_cloud_fraction": None,
+            "naip_image_path": None,
+            "naip_exists": None,
+            "naip_source_datetime": None,
+            "naip_days_offset": None,
+        }
+    )
+
+    if updates:
+        updates_df = pd.DataFrame(updates).drop_duplicates(subset="pair_id", keep="last")
+        base = base.merge(updates_df, how="left", on="pair_id", suffixes=("", "_new"))
+        for col in [
+            "sentinel_source_datetime",
+            "sentinel_days_offset",
+            "sentinel_scene_cloud_percent",
+            "sentinel_patch_cloud_fraction",
+        ]:
+            new_col = f"{col}_new"
+            if new_col in base.columns:
+                base[col] = base[new_col].combine_first(base[col])
+                base = base.drop(columns=[new_col])
+
+    existing = pd.read_csv(manifest_path) if manifest_path.exists() else None
+    merged = _merge_manifest(existing, base)
+    merged.to_csv(manifest_path, index=False)
+    print(f"Wrote pairing manifest to {manifest_path}")
 
 
 def main(
@@ -281,38 +408,18 @@ def main(
     pixel_size_meters: float = SENTINEL_PIXEL_SIZE_METERS,
     dataset: str = SENTINEL_DATASET,
     archive_start: str = DEFAULT_ARCHIVE_START,
+    manifest_path: str | None = None,
 ):
-    """Download Sentinel v_graft PNGs keyed by loc_id."""
-    out_root = (
-        Path(output_dir)
-        if output_dir
-        else cache_path / "sentinel_v_graft_images_png"
-    )
+    """Download one Sentinel PNG per camera-trap row and update the pairing manifest."""
+    out_root = Path(output_dir) if output_dir else cache_path / "sentinel_v_graft_images_png"
     out_root.mkdir(parents=True, exist_ok=True)
+    manifest = Path(manifest_path) if manifest_path else PAIRING_CSV
 
-    pkl_path = cache_path / "wi_blank_images.pkl"
-    print(f"Loading {pkl_path} ...")
-    df = pd.read_pickle(pkl_path)
-
-    valid_path = cache_path / "wi_blank_images_valid.txt"
-    df_valid = pd.read_csv(valid_path, header=None, names=["FilePath"])
-    df = pd.merge(df, df_valid, how="inner", on="FilePath")
-    print(f"  {len(df)} rows after filtering to wi_blank_images_valid.txt")
-
-    df = (
-        df.sort_values("Date_Time")
-        .drop_duplicates(subset="loc_id", keep="first")
-        .reset_index(drop=True)
-    )
-
-    if max_rows is not None:
-        df = df.head(max_rows).copy()
-    print(f"Processing {len(df)} unique loc_ids  ->  saving to {out_root}")
-
-    def _dest(row: pd.Series) -> Path:
-        return out_root / f"{row['loc_id']}.png"
+    df = _load_ground_rows(max_rows=max_rows)
+    print(f"Processing {len(df)} camera-trap rows  ->  saving to {out_root}")
 
     counts = {"saved": 0, "skipped": 0, "failed": 0}
+    updates: list[dict[str, Any]] = []
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
@@ -320,7 +427,7 @@ def main(
                 _process_row,
                 idx,
                 row,
-                _dest(row),
+                out_root / f"{row['pair_id']}.png",
                 image_size,
                 pixel_size_meters,
                 cloud_percent,
@@ -334,14 +441,18 @@ def main(
 
         with tqdm(total=len(futures), desc="Downloading Sentinel v_graft", unit="img") as pbar:
             for future in as_completed(futures):
-                _, status = future.result()
+                _, status, payload = future.result()
                 counts[status] += 1
+                if payload:
+                    updates.append(payload)
                 pbar.set_postfix(counts, refresh=False)
                 pbar.update(1)
 
+    _write_manifest(df, out_root, updates, manifest)
+
     total = sum(counts.values())
     print(
-        f"\nDone.  {total} loc_ids processed: "
+        f"\nDone.  {total} rows processed: "
         f"{counts['saved']} saved, "
         f"{counts['skipped']} skipped, "
         f"{counts['failed']} failed."

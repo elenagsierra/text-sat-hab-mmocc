@@ -12,4 +12,6 @@ recovered_sentinel_images/
 .export*/
 .logs/
 .env
+.venv
+.codex
 Rplots.pdf

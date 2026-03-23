@@ -1,7 +1,7 @@
 """Utilities for loading GRAFT models and CLIP-aligned text encoders.
 
 Assumptions:
-    - The GRAFT Sentinel checkpoint is trained to align with CLIP ViT-B/16.
+    - GRAFT checkpoints are trained to align with CLIP ViT-B/16.
     - Inputs are RGB images in [0, 1] and normalized with CLIP statistics.
 """
 
@@ -27,23 +27,66 @@ CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
 CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
 GRAFT_EMBED_DIM = 512
 GRAFT_DEFAULT_IMAGE_SIZE = 224
-GRAFT_CHECKPOINT = weights_path / "graft" / "graft_sentinel.ckpt"
+GRAFT_CHECKPOINTS: dict[tuple[str, str], Path] = {
+    ("sentinel", "image"): weights_path / "graft" / "graft_sentinel.ckpt",
+    ("sentinel", "pixel"): weights_path / "graft" / "graft_sentinel_patch.ckpt",
+    ("naip", "image"): weights_path / "graft" / "graft_naip.ckpt",
+    ("naip", "pixel"): weights_path / "graft" / "graft_naip_patch.ckpt",
+}
 
 
-def _resolve_checkpoint(path: Path) -> Path:
-    if path.exists():
-        return path
-    fallback = Path(__file__).resolve().parents[1] / "weights" / "graft" / "graft_sentinel.ckpt"
+def _normalize_imagery_family(imagery_family: str) -> str:
+    normalized = str(imagery_family).strip().lower()
+    if normalized.startswith("sentinel"):
+        return "sentinel"
+    if normalized.startswith("naip"):
+        return "naip"
+    raise ValueError(
+        f"Unknown GRAFT imagery family '{imagery_family}'. Choose from: ['naip', 'sentinel']"
+    )
+
+
+def _normalize_checkpoint_level(checkpoint_level: str) -> str:
+    normalized = str(checkpoint_level).strip().lower()
+    aliases = {
+        "image": "image",
+        "image_level": "image",
+        "pixel": "pixel",
+        "pixel_level": "pixel",
+        "patch": "pixel",
+        "patch_level": "pixel",
+    }
+    if normalized not in aliases:
+        raise ValueError(
+            "Unknown GRAFT checkpoint level "
+            f"'{checkpoint_level}'. Choose from: ['image', 'pixel']"
+        )
+    return aliases[normalized]
+
+
+def resolve_graft_checkpoint(
+    imagery_family: str = "sentinel", checkpoint_level: str = "image"
+) -> Path:
+    family = _normalize_imagery_family(imagery_family)
+    level = _normalize_checkpoint_level(checkpoint_level)
+    configured = GRAFT_CHECKPOINTS[(family, level)]
+    if configured.exists():
+        return configured
+    fallback = Path(__file__).resolve().parents[1] / "weights" / "graft" / configured.name
     if fallback.exists():
         return fallback
-    raise FileNotFoundError(f"GRAFT checkpoint not found at {path} or {fallback}")
+    raise FileNotFoundError(
+        f"GRAFT checkpoint not found at {configured} or {fallback}"
+    )
 
 
 @dataclass(frozen=True)
 class GraftConfig:
     """Configuration for loading GRAFT models."""
 
-    checkpoint_path: Path = GRAFT_CHECKPOINT
+    checkpoint_path: Path | None = None
+    imagery_family: str = "sentinel"
+    checkpoint_level: str = "image"
     clip_model_name: str = CLIP_MODEL_NAME
     image_size: int = GRAFT_DEFAULT_IMAGE_SIZE
 
@@ -74,7 +117,9 @@ class GraftModel(nn.Module):
         return F.normalize(embed, dim=-1)
 
 
-def build_graft_transform(image_size: int = GRAFT_DEFAULT_IMAGE_SIZE) -> transforms.Compose:
+def build_graft_transform(
+    image_size: int = GRAFT_DEFAULT_IMAGE_SIZE,
+) -> transforms.Compose:
     """Build the CLIP-normalized transform expected by GRAFT."""
 
     return transforms.Compose(
@@ -92,8 +137,10 @@ def load_graft_model(
     """Load the GRAFT model and checkpoint weights."""
 
     cfg = config or GraftConfig()
+    checkpoint_path = cfg.checkpoint_path or resolve_graft_checkpoint(
+        cfg.imagery_family, cfg.checkpoint_level
+    )
     model = GraftModel(cfg.clip_model_name)
-    checkpoint_path = _resolve_checkpoint(cfg.checkpoint_path)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = checkpoint["state_dict"] if isinstance(checkpoint, dict) else checkpoint
     model.load_state_dict(state_dict, strict=False)

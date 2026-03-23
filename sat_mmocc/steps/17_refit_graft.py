@@ -46,8 +46,9 @@ from mmocc.utils import (
     run_biolith_in_process,
 )
 
-# Maps imagery_source → GRAFT feature backbone name (must match step 16 output)
-IMAGERY_SOURCE_GRAFT_BACKBONE: dict[str, str] = {
+# Base GRAFT feature backbones (must match step 16 output for image-level
+# checkpoints; pixel-level checkpoints add a suffix).
+IMAGERY_SOURCE_GRAFT_BACKBONE_BASE: dict[str, str] = {
     "sentinel": "graft",
     "naip": "graft_naip",
     "sentinel_v_graft": "graft_sentinel_v_graft",
@@ -81,12 +82,48 @@ def _get_descriptor_file(source: str, imagery_source: str) -> Path:
     raise ValueError(f"Unknown descriptor source: {source}")
 
 
-def _get_descriptor_label(source: str, imagery_source: str) -> str:
+def _normalize_checkpoint_level(checkpoint_level: str) -> str:
+    normalized = str(checkpoint_level).strip().lower()
+    aliases = {
+        "image": "image",
+        "image_level": "image",
+        "pixel": "pixel",
+        "pixel_level": "pixel",
+        "patch": "pixel",
+        "patch_level": "pixel",
+    }
+    if normalized not in aliases:
+        raise ValueError(
+            f"Unknown checkpoint_level '{checkpoint_level}'. Choose from: ['image', 'pixel']"
+        )
+    return aliases[normalized]
+
+
+def _get_sat_backbone_data(imagery_source: str, checkpoint_level: str) -> str:
+    base = IMAGERY_SOURCE_GRAFT_BACKBONE_BASE.get(imagery_source)
+    if base is None:
+        raise ValueError(
+            f"Unknown imagery_source '{imagery_source}'. "
+            f"Choose from: {sorted(IMAGERY_SOURCE_GRAFT_BACKBONE_BASE)}"
+        )
+    normalized_level = _normalize_checkpoint_level(checkpoint_level)
+    if normalized_level == "image":
+        return base
+    return f"{base}_{normalized_level}"
+
+
+def _get_descriptor_label(
+    source: str,
+    imagery_source: str,
+    checkpoint_level: str = "image",
+) -> str:
     """Return the sat_backbone label used in experiment filenames."""
+    normalized_level = _normalize_checkpoint_level(checkpoint_level)
+    suffix = "" if normalized_level == "image" else f"_{normalized_level}"
     if source == "expert":
-        return "graft_expert"
+        return f"graft_expert{suffix}"
     if source == "visdiff":
-        return f"graft_visdiff_{imagery_source}"
+        return f"graft_visdiff_{imagery_source}{suffix}"
     raise ValueError(f"Unknown descriptor source: {source}")
 
 
@@ -176,10 +213,13 @@ def fit(
     image_backbone_name: str,
     sat_backbone_data: str,
     imagery_source: str = "sentinel",
+    checkpoint_level: str = "image",
 ):
     modalities_list = sorted(list(modalities))
     if "sat" not in modalities_list:
         raise ValueError("GRAFT descriptor refits require the 'sat' modality.")
+    image_backbone_result = image_backbone_name if "image" in modalities_list else None
+    sat_backbone_data_result = sat_backbone_data if "sat" in modalities_list else None
 
     (
         _,
@@ -277,15 +317,18 @@ def fit(
         modality: modalities_pca[modality].n_components_ for modality in modalities_list
     }
 
-    sat_backbone_label = _get_descriptor_label(descriptor_source, imagery_source)
+    sat_backbone_label = _get_descriptor_label(
+        descriptor_source, imagery_source, checkpoint_level
+    )
     species_results = dict(
         taxon_id=taxon_id,
         scientific_name=scientific_name,
         common_name=common_name,
         modalities=modalities_list,
-        image_backbone=image_backbone_name,
+        image_backbone=image_backbone_result,
         sat_backbone=sat_backbone_label,
-        sat_backbone_data=sat_backbone_data,
+        sat_backbone_data=sat_backbone_data_result,
+        checkpoint_level=checkpoint_level,
         descriptor_source=descriptor_source,
         limit_to_range=limit_to_range,
         modalities_scaler=modalities_scaler,
@@ -345,7 +388,7 @@ def fit(
     species_results.update(biolith_results)
 
     filename = experiment_to_filename(
-        taxon_id, modalities_list, image_backbone_name, sat_backbone_label, "pkl"
+        taxon_id, modalities_list, image_backbone_result, sat_backbone_label, "pkl"
     )
     fit_results_path = cache_path / "fit_results"
     fit_results_path.mkdir(parents=True, exist_ok=True)
@@ -412,6 +455,7 @@ def main(
     species: Sequence[str] | str | None = None,
     max_species: int | None = None,
     imagery_source: str = "sentinel",
+    checkpoint_level: str = "image",
 ):
     descriptor_settings = {
         "visdiff": DescriptorSettings(max_entries=visdiff_limit),
@@ -426,14 +470,11 @@ def main(
     if max_species is not None:
         species_ids = species_ids[:max_species]
 
-    # Resolve the GRAFT feature backbone for this imagery source
+    checkpoint_level = _normalize_checkpoint_level(checkpoint_level)
+
+    # Resolve the GRAFT feature backbone for this imagery source and checkpoint level
     if sat_backbone_data is None:
-        sat_backbone_data = IMAGERY_SOURCE_GRAFT_BACKBONE.get(imagery_source)
-        if sat_backbone_data is None:
-            raise ValueError(
-                f"Unknown imagery_source '{imagery_source}'. "
-                f"Choose from: {sorted(IMAGERY_SOURCE_GRAFT_BACKBONE)}"
-            )
+        sat_backbone_data = _get_sat_backbone_data(imagery_source, checkpoint_level)
 
     descriptor_species = {
         source: set(
@@ -454,12 +495,17 @@ def main(
                 if taxon_id not in descriptor_species[source]:
                     continue
 
-                sat_backbone_label = _get_descriptor_label(source, imagery_source)
+                sat_backbone_label = _get_descriptor_label(
+                    source, imagery_source, checkpoint_level
+                )
                 if skip_existing:
+                    image_backbone_result = (
+                        image_backbone if "image" in modalities_list else None
+                    )
                     filename = experiment_to_filename(
                         taxon_id,
                         set(modalities_list),
-                        image_backbone,
+                        image_backbone_result,
                         sat_backbone_label,
                         "pkl",
                     )
@@ -476,6 +522,7 @@ def main(
                         image_backbone,
                         sat_backbone_data,
                         imagery_source,
+                        checkpoint_level,
                     )
                 )
 
@@ -509,6 +556,7 @@ def main(
                 "image_backbone": image_backbone,
                 "sat_backbone_data": sat_backbone_data,
                 "imagery_source": imagery_source,
+                "checkpoint_level": checkpoint_level,
                 "num_species": len(species_ids),
                 "num_jobs": len(jobs),
             },
