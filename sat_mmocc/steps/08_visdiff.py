@@ -32,6 +32,7 @@ from sat_mmocc.config import (
     default_sat_backbone,
     visdiff_model_name,
 )
+from sat_mmocc.imagery_lookups import load_imagery_lookup
 from sat_mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
@@ -52,14 +53,11 @@ DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
 VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv"
 VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_naip_wi_prompt2.csv"
-# Maps imagery_source keyword → (png directory, default output CSV)
-IMAGERY_SOURCE_PNG_DIRS = {
-    "sentinel": cache_path / "sat_wi_rgb_images_png",
-    "naip": cache_path / "naip_wi_images_png",
-}
 IMAGERY_SOURCE_OUTPUT_FILES = {
     "sentinel": VISDIFF_DESCRIPTIONS_FILE,
     "naip": VISDIFF_NAIP_DESCRIPTIONS_FILE,
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p2.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p2.csv",
 }
 DEFAULT_HYPOTHESES_LIMIT = None
 
@@ -351,11 +349,15 @@ def run_pyvisdiff(
         else None
     )
 
+    species_label = str(species_name).strip() or "species"
+    dataset_a_label = f"present: {species_label}"[:48]
+    dataset_b_label = f"absent: {species_label}"[:48]
+
     return pyvisdiff_run(
         dataset_a_images=positives,
         dataset_b_images=negatives,
-        dataset_a_description=f"Environments where {species_name} is likely to be present",
-        dataset_b_description=f"nvironments where {species_name} is likely to be absent",
+        dataset_a_description=dataset_a_label,
+        dataset_b_description=dataset_b_label,
         config_overrides={
             "captioner": {"prompt": captioner_prompt},
             "proposer": {"model": visdiff_model_name, "prompt": proposer_prompt},
@@ -403,6 +405,16 @@ def run_species_visdiff_job(
         logger.warning("Skipping %s (%s): %s", taxon_id, species_name, exc)
         return
 
+    if "sat" not in resolved_modalities:
+        raise RuntimeError(
+            "VisDiff ranking for step 8 requires a fitted model with the 'sat' modality, "
+            f"but {taxon_id} resolved to {fit_path.name} with modalities={sorted(resolved_modalities)}. "
+            f"Requested modalities={sorted(modalities)} and sat_backbone={lookup_sat_backbone!r}. "
+            "If you only want to swap which satellite PNGs are shown, keep "
+            f"--imagery_source={imagery_source} but use a sat backbone that already has fit results. "
+            "If you want to rank using this new satellite backbone, fit matching sat-enabled results first."
+        )
+
     try:
         display_path = fit_path.relative_to(cache_path)
     except ValueError:
@@ -423,11 +435,9 @@ def run_species_visdiff_job(
         fit_results,
     )
 
-    png_dir = IMAGERY_SOURCE_PNG_DIRS.get(
-        imagery_source, cache_path / f"{imagery_source}_images_png"
-    )
-    site_scores["image_path"] = site_scores["loc_id"].apply(lambda lid: str(png_dir / f"{lid}.png"))
-    site_scores["image_exists"] = site_scores["image_path"].apply(lambda p: Path(p).exists())
+    image_lookup = load_imagery_lookup(imagery_source)
+    site_scores = site_scores.join(image_lookup, on="loc_id", how="left")
+    site_scores["image_exists"] = site_scores["image_exists"].fillna(False).astype(bool)
 
     available_images = int(
         (site_scores["image_exists"] & site_scores["is_train"]).sum()

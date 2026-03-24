@@ -24,6 +24,7 @@ association in a shared manifest for step 08c.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
+import os
 from hashlib import sha1
 from io import BytesIO
 from pathlib import Path
@@ -99,7 +100,7 @@ def _load_ground_rows(max_rows: int | None = None) -> pd.DataFrame:
     df["ground_image_path"] = df["FilePath"].str.replace(
         "gs://", f"{wi_image_path}/", n=1
     )
-    df["ground_image_exists"] = df["ground_image_path"].apply(lambda p: Path(p).exists())
+    df["ground_image_exists"] = True
     return df
 
 
@@ -216,9 +217,6 @@ def _process_row(
     dataset: str,
     archive_start: str,
 ) -> tuple[int, str, dict[str, Any]]:
-    if dest.exists():
-        return row_idx, "skipped", {"pair_id": row["pair_id"]}
-
     timestamp = row["Date_Time"]
     if hasattr(timestamp, "to_pydatetime"):
         ts = timestamp.to_pydatetime().isoformat()
@@ -250,6 +248,20 @@ def _process_row(
     return row_idx, "saved", payload
 
 
+def _existing_pair_ids(out_root: Path) -> set[str]:
+    """Scan the output directory once and return already-downloaded pair ids."""
+
+    if not out_root.exists():
+        return set()
+
+    pair_ids: set[str] = set()
+    with os.scandir(out_root) as entries:
+        for entry in entries:
+            if entry.is_file() and entry.name.endswith(".png"):
+                pair_ids.add(Path(entry.name).stem)
+    return pair_ids
+
+
 def _merge_manifest(existing: pd.DataFrame | None, updated: pd.DataFrame) -> pd.DataFrame:
     updated = updated.set_index("pair_id")
     if existing is not None and not existing.empty:
@@ -270,6 +282,7 @@ def _write_manifest(
     out_root: Path,
     updates: list[dict[str, Any]],
     manifest_path: Path,
+    existing_pair_ids: set[str],
 ) -> None:
     base = pd.DataFrame(
         {
@@ -288,7 +301,7 @@ def _write_manifest(
             "sentinel_scene_cloud_percent": None,
             "sentinel_patch_cloud_fraction": None,
             "naip_image_path": df["pair_id"].apply(lambda pid: str(out_root / f"{pid}.png")),
-            "naip_exists": df["pair_id"].apply(lambda pid: (out_root / f"{pid}.png").exists()),
+            "naip_exists": df["pair_id"].isin(existing_pair_ids),
             "naip_source_datetime": None,
             "naip_days_offset": None,
         }
@@ -328,35 +341,46 @@ def main(
     df = _load_ground_rows(max_rows=max_rows)
     print(f"Processing {len(df)} camera-trap rows  ->  saving to {out_root}")
 
-    counts = {"saved": 0, "skipped": 0, "failed": 0}
+    existing_pair_ids = _existing_pair_ids(out_root)
+    pending_df = df.loc[~df["pair_id"].isin(existing_pair_ids)].reset_index(drop=True)
+    print(
+        f"Found {len(existing_pair_ids)} existing PNGs; "
+        f"{len(pending_df)} rows remain to download."
+    )
+
+    counts = {"saved": 0, "skipped": len(df) - len(pending_df), "failed": 0}
     updates: list[dict[str, Any]] = []
+    final_existing_pair_ids = set(existing_pair_ids)
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(
-                _process_row,
-                idx,
-                row,
-                out_root / f"{row['pair_id']}.png",
-                image_size,
-                pixel_size_meters,
-                project,
-                dataset,
-                archive_start,
-            ): idx
-            for idx, row in df.iterrows()
-        }
+    if not pending_df.empty:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_row,
+                    idx,
+                    row,
+                    out_root / f"{row['pair_id']}.png",
+                    image_size,
+                    pixel_size_meters,
+                    project,
+                    dataset,
+                    archive_start,
+                ): idx
+                for idx, row in pending_df.iterrows()
+            }
 
-        with tqdm(total=len(futures), desc="Downloading NAIP v_graft", unit="img") as pbar:
-            for future in as_completed(futures):
-                _, status, payload = future.result()
-                counts[status] += 1
-                if payload:
-                    updates.append(payload)
-                pbar.set_postfix(counts, refresh=False)
-                pbar.update(1)
+            with tqdm(total=len(futures), desc="Downloading NAIP v_graft", unit="img") as pbar:
+                for future in as_completed(futures):
+                    _, status, payload = future.result()
+                    counts[status] += 1
+                    if payload:
+                        updates.append(payload)
+                        if status == "saved":
+                            final_existing_pair_ids.add(payload["pair_id"])
+                    pbar.set_postfix(counts, refresh=False)
+                    pbar.update(1)
 
-    _write_manifest(df, out_root, updates, manifest)
+    _write_manifest(df, out_root, updates, manifest, final_existing_pair_ids)
 
     total = sum(counts.values())
     print(

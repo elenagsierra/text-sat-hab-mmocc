@@ -46,6 +46,7 @@ from mmocc.graft_utils import (
     resolve_graft_checkpoint,
 )
 from mmocc.utils import get_submitit_executor
+from sat_mmocc.imagery_lookups import build_pairing_filepath_lookup, load_pairing_manifest
 
 # Maps imagery_source → PNG directory (mirrors step 08)
 IMAGERY_SOURCE_PNG_DIRS: dict[str, Path] = {
@@ -98,15 +99,9 @@ def _build_loc_id_png_lookup(df: pd.DataFrame, png_dir: Path) -> dict[str, Path]
 def _build_v_graft_row_paths(df: pd.DataFrame, imagery_source: str) -> list[Path | None]:
     """Return per-row PNG paths for ``*_v_graft`` imagery sources."""
 
-    if not PAIRING_CSV.exists():
-        raise FileNotFoundError(
-            f"Pairing manifest not found at {PAIRING_CSV}. "
-            "Run the v_graft download script first."
-        )
-
     path_column = V_GRAFT_PATH_COLUMNS[imagery_source]
     exists_column = V_GRAFT_EXISTS_COLUMNS[imagery_source]
-    pairing_df = pd.read_csv(PAIRING_CSV)
+    pairing_df = load_pairing_manifest(PAIRING_CSV)
     required_columns = {"FilePath", path_column}
     missing_columns = required_columns.difference(pairing_df.columns)
     if missing_columns:
@@ -115,9 +110,7 @@ def _build_v_graft_row_paths(df: pd.DataFrame, imagery_source: str) -> list[Path
             f"{sorted(missing_columns)}"
         )
 
-    pairing_df["FilePath"] = pairing_df["FilePath"].astype(str)
-    pairing_df = pairing_df.drop_duplicates(subset="FilePath", keep="last")
-    pairing_lookup = pairing_df.set_index("FilePath")
+    pairing_lookup = build_pairing_filepath_lookup(pairing_df)
 
     row_paths: list[Path | None] = []
     missing_count = 0

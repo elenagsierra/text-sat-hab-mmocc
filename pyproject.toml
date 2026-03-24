@@ -64,4 +64,4 @@ Source = "https://github.com/timmh/multimoodal-occupancy"
 packages = {find = {}}
 
 [tool.uv]
-cache-keys = [{ file = "mmocc/**/*.py" }]
+cache-keys = [{ file = "sat_mmocc/**/*.py" }]

@@ -182,8 +182,12 @@ def rank_image_groups(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     column = f"score_{image_modality}"
     if column not in site_scores.columns:
+        available_score_columns = [
+            col for col in site_scores.columns if col.startswith("score_")
+        ]
         raise KeyError(
-            f"{column} not found in site scores. Available columns: {site_scores.columns.tolist()}"
+            f"{column} not found in site scores. Available score columns: {available_score_columns}. "
+            "This usually means the selected fit results were trained without that modality."
         )
 
     subset_name = "is_test" if test else "is_train"

@@ -62,6 +62,11 @@ from sat_mmocc.config import (
     default_image_backbone,
     default_sat_backbone,
 )
+from sat_mmocc.imagery_lookups import (
+    build_pairing_image_lookup,
+    load_pairing_manifest as load_shared_pairing_manifest,
+    lookup_to_path_map,
+)
 from sat_mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
@@ -75,10 +80,10 @@ matplotlib.use("Agg")  # headless — no display needed
 LOGGER = logging.getLogger(__name__)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_wi_prompt2.csv"
-DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sat_wi_prompt2.csv"
+DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_v_graft_descriptions_p2.csv"
+DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sentinel_v_graft_descriptions_p2.csv"
 DEFAULT_GROUND_CSV = cache_path / "visdiff_descriptions.csv"
-DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_naipwi_figures"
+DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_figures_v_graft"
 DEFAULT_PAIRING_CSV = cache_path / "camera_satellite_pairings_v_graft.csv"
 
 MODALITIES = ["image", "sat", "covariates"]
@@ -366,38 +371,7 @@ def _resolve_shared_locations(
 # ── Image-path mapping ─────────────────────────────────────────────────────────
 
 def _load_pairing_manifest(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(f"Pairing manifest not found: {path}")
-    df = pd.read_csv(path)
-    required = {
-        "loc_id",
-        "ground_date_time",
-        "Latitude",
-        "Longitude",
-        "ground_image_path",
-        "ground_image_exists",
-        "sentinel_image_path",
-        "sentinel_exists",
-        "naip_image_path",
-        "naip_exists",
-    }
-    missing = sorted(required - set(df.columns))
-    if missing:
-        raise ValueError(f"Pairing manifest {path} missing required columns: {missing}")
-
-    df["loc_id"] = df["loc_id"].astype(str)
-    df["ground_date_time"] = pd.to_datetime(df["ground_date_time"], errors="coerce")
-    for path_col, exists_col in [
-        ("ground_image_path", "ground_image_exists"),
-        ("sentinel_image_path", "sentinel_exists"),
-        ("naip_image_path", "naip_exists"),
-    ]:
-        df[path_col] = df[path_col].fillna("").astype(str)
-        if exists_col in df.columns:
-            df[exists_col] = df[exists_col].fillna(False).astype(bool)
-        else:
-            df[exists_col] = df[path_col].apply(lambda p: Path(p).exists() if p else False)
-    return df
+    return load_shared_pairing_manifest(path)
 
 
 def _build_complete_triplet_lookup(
@@ -405,27 +379,16 @@ def _build_complete_triplet_lookup(
     path_column: str,
     exists_column: str,
 ) -> pd.DataFrame:
-    subset = pairing_df.copy()
-    subset = subset[
-        subset["ground_image_exists"]
-        & subset["sentinel_exists"]
-        & subset["naip_exists"]
-    ].copy()
-    subset = subset[subset[path_column].astype(str).str.strip() != ""]
-    subset = subset.sort_values("ground_date_time", na_position="last")
-    subset = subset.drop_duplicates(subset="loc_id", keep="first")
-    if subset.empty:
-        return pd.DataFrame(columns=["image_path", "image_exists", "Latitude", "Longitude"])
-    lookup = subset.set_index("loc_id")[[path_column, exists_column, "Latitude", "Longitude"]].rename(
-        columns={path_column: "image_path", exists_column: "image_exists"}
+    return build_pairing_image_lookup(
+        pairing_df,
+        path_column,
+        exists_column,
+        require_complete_triplet=True,
     )
-    return lookup[["image_path", "image_exists", "Latitude", "Longitude"]]
 
 
 def _lookup_to_path_map(image_lookup: pd.DataFrame) -> Dict[str, str]:
-    if image_lookup.empty or "image_path" not in image_lookup.columns:
-        return {}
-    return {str(lid): str(row["image_path"]) for lid, row in image_lookup.iterrows()}
+    return lookup_to_path_map(image_lookup)
 
 
 def _paths_for_source(

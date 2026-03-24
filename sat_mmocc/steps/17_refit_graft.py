@@ -155,6 +155,38 @@ def load_descriptor_table(
     return df
 
 
+def validate_refit_inputs(
+    requested_sources: Sequence[str],
+    imagery_source: str,
+    sat_backbone_data: str,
+) -> None:
+    feature_dir = cache_path / "features"
+    feature_file = feature_dir / f"wi_blank_sat_features_{sat_backbone_data}.npy"
+    feature_id_file = feature_dir / f"wi_blank_sat_features_{sat_backbone_data}_ids.npy"
+    missing_feature_files = [path for path in [feature_file, feature_id_file] if not path.exists()]
+    if missing_feature_files:
+        missing_text = ", ".join(str(path) for path in missing_feature_files)
+        raise FileNotFoundError(
+            "Missing GRAFT satellite feature artifacts for "
+            f"imagery_source='{imagery_source}' and sat_backbone_data='{sat_backbone_data}': "
+            f"{missing_text}. Run sat_mmocc/steps/16_extract_graft_features.py first."
+        )
+
+    for source in requested_sources:
+        descriptor_path = _get_descriptor_file(source, imagery_source)
+        if descriptor_path.exists():
+            continue
+        if source == "visdiff":
+            raise FileNotFoundError(
+                f"Missing VisDiff descriptor CSV for imagery_source='{imagery_source}': "
+                f"{descriptor_path}. Run sat_mmocc/steps/08_visdiff.py with "
+                f"--imagery_source={imagery_source} first."
+            )
+        raise FileNotFoundError(
+            f"Missing descriptor CSV for source='{source}': {descriptor_path}"
+        )
+
+
 def select_descriptors(
     source: str,
     taxon_id: str,
@@ -475,6 +507,8 @@ def main(
     # Resolve the GRAFT feature backbone for this imagery source and checkpoint level
     if sat_backbone_data is None:
         sat_backbone_data = _get_sat_backbone_data(imagery_source, checkpoint_level)
+
+    validate_refit_inputs(requested_sources, imagery_source, sat_backbone_data)
 
     descriptor_species = {
         source: set(

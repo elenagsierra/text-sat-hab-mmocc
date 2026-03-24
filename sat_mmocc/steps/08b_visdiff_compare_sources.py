@@ -55,6 +55,11 @@ from sat_mmocc.config import (
     default_image_backbone,
     default_sat_backbone,
 )
+from sat_mmocc.imagery_lookups import (
+    get_imagery_source_label,
+    load_imagery_lookup,
+    lookup_to_path_map,
+)
 from sat_mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
@@ -71,9 +76,12 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_wi_prompt2.csv"
 DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sat_wi_prompt2.csv"
 DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_figures"
-
-NAIP_PNG_DIR = cache_path / "naip_wi_images_png"
-SENTINEL_PNG_DIR = cache_path / "sat_wi_rgb_images_png"
+DEFAULT_VISDIFF_CSVS = {
+    "naip": DEFAULT_NAIP_CSV,
+    "sentinel": DEFAULT_SENTINEL_CSV,
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions.csv",
+}
 
 MODALITIES = ["image", "sat", "covariates"]
 TOP_K = 50
@@ -237,7 +245,7 @@ def _plot_hypotheses(
 
 def _get_ranked_groups(
     taxon_id: str,
-    png_dir: Path,
+    image_lookup: pd.DataFrame,
     modalities: List[str],
     image_backbone: str,
     sat_backbone: str,
@@ -257,12 +265,8 @@ def _get_ranked_groups(
 
     fit_results = load_fit_results(fit_path)
     site_scores, _ = compute_site_scores(tid, res_mod, res_img, res_sat, fit_results)
-    site_scores["image_path"] = site_scores["loc_id"].apply(
-        lambda lid: str(png_dir / f"{lid}.png")
-    )
-    site_scores["image_exists"] = site_scores["image_path"].apply(
-        lambda p: Path(p).exists()
-    )
+    site_scores = site_scores.join(image_lookup, on="loc_id", how="left")
+    site_scores["image_exists"] = site_scores["image_exists"].fillna(False).astype(bool)
 
     pos_df, neg_df = rank_image_groups(
         site_scores,
@@ -282,8 +286,10 @@ def generate_comparison_figure(
     taxon_id: str,
     naip_visdiff_df: pd.DataFrame,
     sentinel_visdiff_df: pd.DataFrame,
-    naip_png_dir: Path,
-    sentinel_png_dir: Path,
+    naip_imagery_source: str,
+    sentinel_imagery_source: str,
+    naip_png_dir: Path | None = None,
+    sentinel_png_dir: Path | None = None,
     modalities: List[str] = MODALITIES,
     image_backbone: str = default_image_backbone,
     naip_sat_backbone: str = default_sat_backbone,
@@ -297,13 +303,19 @@ def generate_comparison_figure(
 ) -> Optional[plt.Figure]:
     """Return a side-by-side NAIP/Sentinel comparison figure, or None on failure."""
     tid = str(taxon_id)
+    naip_lookup = load_imagery_lookup(naip_imagery_source, png_dir=naip_png_dir)
+    sentinel_lookup = load_imagery_lookup(
+        sentinel_imagery_source, png_dir=sentinel_png_dir
+    )
+    naip_label = get_imagery_source_label(naip_imagery_source)
+    sentinel_label = get_imagery_source_label(sentinel_imagery_source)
 
     naip_result = _get_ranked_groups(
-        tid, naip_png_dir, modalities, image_backbone, naip_sat_backbone,
+        tid, naip_lookup, modalities, image_backbone, naip_sat_backbone,
         top_k, unique_weight, mode,
     )
     sentinel_result = _get_ranked_groups(
-        tid, sentinel_png_dir, modalities, image_backbone, sentinel_sat_backbone,
+        tid, sentinel_lookup, modalities, image_backbone, sentinel_sat_backbone,
         top_k, unique_weight, mode,
     )
 
@@ -313,10 +325,7 @@ def generate_comparison_figure(
 
     # Retrieve display name from whichever source succeeded
     display_name = tid
-    for sat_backbone, png_dir in [
-        (naip_sat_backbone, naip_png_dir),
-        (sentinel_sat_backbone, sentinel_png_dir),
-    ]:
+    for sat_backbone in [naip_sat_backbone, sentinel_sat_backbone]:
         try:
             fit_path, res_mod, res_img, res_sat = resolve_fit_results_path(
                 tid, modalities, image_backbone, sat_backbone
@@ -329,14 +338,18 @@ def generate_comparison_figure(
             continue
 
     # ── Select shared locations per group ──────────────────────────────────────
-    def _paths_for_source(loc_ids: List[str], df: pd.DataFrame, png_dir: Path) -> List[str]:
+    def _paths_for_source(
+        loc_ids: List[str],
+        df: pd.DataFrame,
+        fallback_lookup: dict[str, str],
+    ) -> List[str]:
         """Map selected loc_ids → image paths (in loc_id order) from a ranked df."""
         loc_to_path: dict = {}
         for _, row in df.iterrows():
             loc = str(row.get("loc_id", ""))
             if loc not in loc_to_path:
-                loc_to_path[loc] = str(png_dir / f"{loc}.png")
-        return [loc_to_path.get(lid, str(png_dir / f"{lid}.png")) for lid in loc_ids]
+                loc_to_path[loc] = str(row.get("image_path", ""))
+        return [loc_to_path.get(lid, fallback_lookup.get(lid, "")) for lid in loc_ids]
 
     # Fallback to empty df when one source is missing
     empty_df = pd.DataFrame(columns=["loc_id", "image_path", "image_exists", "Latitude", "Longitude"])
@@ -349,26 +362,29 @@ def generate_comparison_figure(
     primary_neg = naip_neg_df if naip_result else sent_neg_df
     secondary_pos = sent_pos_df if naip_result else empty_df
     secondary_neg = sent_neg_df if naip_result else empty_df
+    primary_label = naip_label if naip_result else sentinel_label
 
     shared_pos_locs = _select_shared_locations(primary_pos, secondary_pos, n_images, min_dist_km)
     shared_neg_locs = _select_shared_locations(primary_neg, secondary_neg, n_images, min_dist_km)
 
     # Fall back to best-available locations when no overlap
     if not shared_pos_locs:
-        LOGGER.warning("%s: no shared Group A locations; falling back to NAIP.", tid)
+        LOGGER.warning("%s: no shared Group A locations; falling back to %s.", tid, primary_label)
         shared_pos_locs = (
             primary_pos["loc_id"].dropna().astype(str).unique()[:n_images].tolist()
         )
     if not shared_neg_locs:
-        LOGGER.warning("%s: no shared Group B locations; falling back to NAIP.", tid)
+        LOGGER.warning("%s: no shared Group B locations; falling back to %s.", tid, primary_label)
         shared_neg_locs = (
             primary_neg["loc_id"].dropna().astype(str).unique()[:n_images].tolist()
         )
 
-    naip_pos_paths = _paths_for_source(shared_pos_locs, naip_pos_df, naip_png_dir)
-    sent_pos_paths = _paths_for_source(shared_pos_locs, sent_pos_df, sentinel_png_dir)
-    naip_neg_paths = _paths_for_source(shared_neg_locs, naip_neg_df, naip_png_dir)
-    sent_neg_paths = _paths_for_source(shared_neg_locs, sent_neg_df, sentinel_png_dir)
+    naip_path_map = lookup_to_path_map(naip_lookup)
+    sentinel_path_map = lookup_to_path_map(sentinel_lookup)
+    naip_pos_paths = _paths_for_source(shared_pos_locs, naip_pos_df, naip_path_map)
+    sent_pos_paths = _paths_for_source(shared_pos_locs, sent_pos_df, sentinel_path_map)
+    naip_neg_paths = _paths_for_source(shared_neg_locs, naip_neg_df, naip_path_map)
+    sent_neg_paths = _paths_for_source(shared_neg_locs, sent_neg_df, sentinel_path_map)
 
     # ── Figure layout ──────────────────────────────────────────────────────────
     #  [ image grid (4 rows × n_images cols) | hypothesis A | hypothesis B ]
@@ -394,10 +410,10 @@ def generate_comparison_figure(
     )
 
     row_specs = [
-        ("Group A (present) — NAIP",     "#2196F3", naip_pos_paths),
-        ("Group A (present) — Sentinel", "#64B5F6", sent_pos_paths),
-        ("Group B (absent)  — NAIP",     "#F44336", naip_neg_paths),
-        ("Group B (absent)  — Sentinel", "#EF9A9A", sent_neg_paths),
+        (f"Group A (present) — {naip_label}",     "#2196F3", naip_pos_paths),
+        (f"Group A (present) — {sentinel_label}", "#64B5F6", sent_pos_paths),
+        (f"Group B (absent)  — {naip_label}",     "#F44336", naip_neg_paths),
+        (f"Group B (absent)  — {sentinel_label}", "#EF9A9A", sent_neg_paths),
     ]
     for row_idx, (label, color, paths) in enumerate(row_specs):
         axes_row = [fig.add_subplot(left_gs[row_idx, c]) for c in range(n_images)]
@@ -405,11 +421,11 @@ def generate_comparison_figure(
 
     # Middle: NAIP hypotheses
     ax_naip = fig.add_subplot(outer[1])
-    _plot_hypotheses(ax_naip, naip_visdiff_df, tid, n_hypotheses, title="NAIP — VisDiff hypotheses")
+    _plot_hypotheses(ax_naip, naip_visdiff_df, tid, n_hypotheses, title=f"{naip_label} — VisDiff hypotheses")
 
     # Right: Sentinel hypotheses
     ax_sent = fig.add_subplot(outer[2])
-    _plot_hypotheses(ax_sent, sentinel_visdiff_df, tid, n_hypotheses, title="Sentinel — VisDiff hypotheses")
+    _plot_hypotheses(ax_sent, sentinel_visdiff_df, tid, n_hypotheses, title=f"{sentinel_label} — VisDiff hypotheses")
 
     plt.tight_layout()
     return fig
@@ -418,10 +434,10 @@ def generate_comparison_figure(
 # ── CLI entry point ────────────────────────────────────────────────────────────
 
 def main(
-    naip_csv: str | Path = DEFAULT_NAIP_CSV,
-    sentinel_csv: str | Path = DEFAULT_SENTINEL_CSV,
-    naip_png_dir: str | Path = NAIP_PNG_DIR,
-    sentinel_png_dir: str | Path = SENTINEL_PNG_DIR,
+    naip_csv: str | Path | None = None,
+    sentinel_csv: str | Path | None = None,
+    naip_png_dir: str | Path | None = None,
+    sentinel_png_dir: str | Path | None = None,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     fmt: str = "png",
     species_ids: Sequence[str] | str | None = None,
@@ -429,6 +445,8 @@ def main(
     image_backbone: str = default_image_backbone,
     naip_sat_backbone: str = default_sat_backbone,
     sentinel_sat_backbone: str = default_sat_backbone,
+    naip_imagery_source: str = "naip",
+    sentinel_imagery_source: str = "sentinel",
     top_k: int = TOP_K,
     unique_weight: float = UNIQUE_WEIGHT,
     n_images: int = N_IMAGES,
@@ -442,10 +460,10 @@ def main(
 
     Parameters
     ----------
-    naip_csv:              Path to NAIP VisDiff descriptions CSV.
-    sentinel_csv:          Path to Sentinel VisDiff descriptions CSV.
-    naip_png_dir:          Directory containing NAIP PNG images (named <loc_id>.png).
-    sentinel_png_dir:      Directory containing Sentinel PNG images (named <loc_id>.png).
+    naip_csv:              Path to NAIP-side VisDiff descriptions CSV.
+    sentinel_csv:          Path to Sentinel-side VisDiff descriptions CSV.
+    naip_png_dir:          Optional directory override for standard NAIP PNGs.
+    sentinel_png_dir:      Optional directory override for standard Sentinel PNGs.
     output_dir:            Directory to write figures into (created if needed).
     fmt:                   Output format — "png" or "pdf".
     species_ids:           Comma-separated taxon IDs, or omit for all species in CSVs.
@@ -453,6 +471,8 @@ def main(
     image_backbone:        Camera-trap image backbone name.
     naip_sat_backbone:     Satellite backbone used for NAIP fit results.
     sentinel_sat_backbone: Satellite backbone used for Sentinel fit results.
+    naip_imagery_source:   Imagery source used for the NAIP-side panels.
+    sentinel_imagery_source: Imagery source used for the Sentinel-side panels.
     top_k:                 Number of top/bottom sites per group.
     unique_weight:         Uniqueness weight for "unique" ranking mode.
     n_images:              Thumbnails per source row (5 → 20 thumbnails total per species).
@@ -467,10 +487,10 @@ def main(
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    naip_csv = Path(naip_csv)
-    sentinel_csv = Path(sentinel_csv)
-    naip_png_dir = Path(naip_png_dir)
-    sentinel_png_dir = Path(sentinel_png_dir)
+    naip_csv = Path(naip_csv) if naip_csv is not None else DEFAULT_VISDIFF_CSVS.get(naip_imagery_source, DEFAULT_NAIP_CSV)
+    sentinel_csv = Path(sentinel_csv) if sentinel_csv is not None else DEFAULT_VISDIFF_CSVS.get(sentinel_imagery_source, DEFAULT_SENTINEL_CSV)
+    naip_png_dir = Path(naip_png_dir) if naip_png_dir is not None else None
+    sentinel_png_dir = Path(sentinel_png_dir) if sentinel_png_dir is not None else None
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -478,6 +498,8 @@ def main(
 
     LOGGER.info("Loading NAIP CSV:     %s", naip_csv)
     LOGGER.info("Loading Sentinel CSV: %s", sentinel_csv)
+    LOGGER.info("NAIP imagery source:     %s", naip_imagery_source)
+    LOGGER.info("Sentinel imagery source: %s", sentinel_imagery_source)
 
     def _load_visdiff(path: Path) -> pd.DataFrame:
         if not path.exists():
@@ -525,6 +547,8 @@ def main(
                 tid,
                 naip_visdiff_df=naip_visdiff,
                 sentinel_visdiff_df=sentinel_visdiff,
+                naip_imagery_source=naip_imagery_source,
+                sentinel_imagery_source=sentinel_imagery_source,
                 naip_png_dir=naip_png_dir,
                 sentinel_png_dir=sentinel_png_dir,
                 modalities=mod_list,
