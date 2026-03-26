@@ -17,8 +17,10 @@ from where it is absent."""
 import logging
 import math
 import os
+import re
 import sys
 import types
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, cast
 
@@ -51,15 +53,35 @@ DEFAULT_MODALITY = "sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
-VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv"
-VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_naip_wi_prompt2.csv"
+VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_sentinel2_wi_prompt3_noduplicates.csv"
+VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_naip_wi_prompt3_noduplicates.csv"
 IMAGERY_SOURCE_OUTPUT_FILES = {
     "sentinel": VISDIFF_DESCRIPTIONS_FILE,
     "naip": VISDIFF_NAIP_DESCRIPTIONS_FILE,
-    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p2.csv",
-    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p2.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p3_noduplicates.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p3_noduplicates.csv",
 }
 DEFAULT_HYPOTHESES_LIMIT = None
+NEAR_DUPLICATE_JACCARD_THRESHOLD = 0.7
+NEAR_DUPLICATE_SEQ_THRESHOLD = 0.82
+NEAR_DUPLICATE_STOPWORDS = {
+    "a",
+    "an",
+    "the",
+    "with",
+    "and",
+    "of",
+    "in",
+    "on",
+    "to",
+    "from",
+    "very",
+    "more",
+    "less",
+    "continuous",
+    "scattered",
+    "patchy",
+}
 
 
 def _should_stub_cv2(exc: BaseException) -> bool:
@@ -216,6 +238,51 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
+def normalize_difference_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    tokens = [tok for tok in text.split() if tok not in NEAR_DUPLICATE_STOPWORDS]
+    return " ".join(tokens)
+
+
+def token_jaccard(a: str, b: str) -> float:
+    a_tokens = set(a.split())
+    b_tokens = set(b.split())
+    if not a_tokens or not b_tokens:
+        return 0.0
+    return len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
+
+
+def string_similarity(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def is_near_duplicate(
+    candidate: str,
+    existing_values: Sequence[str],
+    *,
+    jaccard_threshold: float = NEAR_DUPLICATE_JACCARD_THRESHOLD,
+    seq_threshold: float = NEAR_DUPLICATE_SEQ_THRESHOLD,
+) -> bool:
+    normalized_candidate = normalize_difference_text(candidate)
+    if not normalized_candidate:
+        return True
+
+    for existing in existing_values:
+        normalized_existing = normalize_difference_text(existing)
+        if not normalized_existing:
+            continue
+        if normalized_candidate == normalized_existing:
+            return True
+        if token_jaccard(normalized_candidate, normalized_existing) >= jaccard_threshold:
+            return True
+        if string_similarity(normalized_candidate, normalized_existing) >= seq_threshold:
+            return True
+
+    return False
+
+
 def build_visdiff_rows(
     taxon_id: str,
     species_name: str,
@@ -259,18 +326,37 @@ def aggregate_visdiff_rows(rows: Sequence[Dict[str, str | float]]) -> pd.DataFra
     minimum_columns = ["taxon_id", "species", "difference", "auroc"]
     if not rows:
         return pd.DataFrame(columns=minimum_columns)
+
     df = pd.DataFrame(rows)
     missing = [col for col in minimum_columns if col not in df.columns]
     if missing:
         raise KeyError(f"Missing columns in VisDiff rows: {missing}")
+
     df["auroc"] = pd.to_numeric(df["auroc"], errors="coerce")
-    df = df.sort_values("auroc", ascending=False).drop_duplicates(
-        subset=["taxon_id", "species", "difference"]
-    )
     df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False]).reset_index(
         drop=True
     )
-    return df
+
+    deduped_rows: List[Dict[str, str | float]] = []
+    for _, group in df.groupby("taxon_id", sort=False):
+        kept_differences: List[str] = []
+        for _, row in group.iterrows():
+            difference = str(row["difference"]).strip()
+            if not difference:
+                continue
+            if is_near_duplicate(difference, kept_differences):
+                continue
+            kept_differences.append(difference)
+            deduped_rows.append(cast(Dict[str, str | float], row.to_dict()))
+
+    deduped_df = pd.DataFrame(deduped_rows)
+    if deduped_df.empty:
+        return pd.DataFrame(columns=df.columns)
+
+    deduped_df = deduped_df.sort_values(
+        ["taxon_id", "auroc"], ascending=[True, False]
+    ).reset_index(drop=True)
+    return deduped_df
 
 
 def load_existing_visdiff_rows(
@@ -336,7 +422,7 @@ def run_pyvisdiff(
 
     List 10 distinct concepts more likely in Group A than Group B.
 
-    Each concept must be a short noun phrase describing one visible habitat feature. Use only generic observable descriptors. Do not mention modality, image quality, proper nouns, place names, geographic labels, biome labels, or inferred location. Rewrite any named place or regional term into a purely visual habitat phrase.
+    Each concept must be a short noun phrase describing one visible habitat feature. Use only generic observable descriptors. Do not mention modality, image quality, proper nouns, place names, geographic labels, biome labels, or inferred location. Rewrite any named place or regional term into a purely visual habitat phrase. Avoid restating the same concept with minor wording changes. Each bullet must describe a materially different visible habitat feature.
 
     Answer using bullet points starting with "*".
     """

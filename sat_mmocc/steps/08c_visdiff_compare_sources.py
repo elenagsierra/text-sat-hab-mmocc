@@ -80,10 +80,10 @@ matplotlib.use("Agg")  # headless — no display needed
 LOGGER = logging.getLogger(__name__)
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_v_graft_descriptions_p2.csv"
-DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sentinel_v_graft_descriptions_p2.csv"
+DEFAULT_NAIP_CSV = cache_path / "visdiff_naip_v_graft_descriptions_p3_noduplicates.csv"
+DEFAULT_SENTINEL_CSV = cache_path / "visdiff_sentinel_v_graft_descriptions_p3_noduplicates.csv"
 DEFAULT_GROUND_CSV = cache_path / "visdiff_descriptions.csv"
-DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_figures_v_graft"
+DEFAULT_OUTPUT_DIR = cache_path / "visdiff_compare_figures_v_graft_p3_noduplicates"
 DEFAULT_PAIRING_CSV = cache_path / "camera_satellite_pairings_v_graft.csv"
 
 MODALITIES = ["image", "sat", "covariates"]

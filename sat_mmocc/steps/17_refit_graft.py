@@ -59,8 +59,8 @@ IMAGERY_SOURCE_GRAFT_BACKBONE_BASE: dict[str, str] = {
 IMAGERY_SOURCE_VISDIFF_FILES: dict[str, Path] = {
     "sentinel": cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv",
     "naip": cache_path / "visdiff_sat_naip_wi_prompt2.csv",
-    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions.csv",
-    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p2.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p2.csv",
 }
 
 # Expert descriptors are imagery-source-independent
