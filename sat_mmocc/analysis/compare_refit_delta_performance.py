@@ -29,16 +29,17 @@ import pandas as pd
 
 from compare_graft_sat_env_performance import (  # sibling module import
     PRIMARY_METRICS,
-    build_fit_results_path,
     load_fit_record,
     load_final_species_ids,
     load_species_ids,
+    build_fit_results_path,
+    get_graft_refit_sat_backbone,
 )
 from sat_mmocc.config import default_image_backbone, default_sat_backbone
 from sat_mmocc.utils import get_scientific_taxon_map, get_taxon_map
 
 DEFAULT_OUTPUT_PREFIX = (
-    Path(__file__).resolve().parent / "outputs" / "compare_refit_delta_performance"
+    Path(__file__).resolve().parent / "outputs" / "p4" / "p4"
 )
 
 
@@ -68,7 +69,7 @@ def build_experiment_specs() -> list[ExperimentSpec]:
             display_name="GRAFT Sentinel refit",
             modalities=("covariates", "sat"),
             image_backbone=default_image_backbone,
-            sat_backbone="graft_visdiff_sentinel",
+            sat_backbone=get_graft_refit_sat_backbone("visdiff", "sentinel_v_graft"),
             domain="satellite",
             reference_label="sat_env_baseline",
         ),
@@ -77,7 +78,7 @@ def build_experiment_specs() -> list[ExperimentSpec]:
             display_name="GRAFT NAIP refit",
             modalities=("covariates", "sat"),
             image_backbone=default_image_backbone,
-            sat_backbone="graft_visdiff_naip",
+            sat_backbone=get_graft_refit_sat_backbone("visdiff", "naip_v_graft"),
             domain="satellite",
             reference_label="sat_env_baseline",
         ),

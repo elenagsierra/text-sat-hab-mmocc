@@ -9,26 +9,16 @@
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
-"""Generate per-species VisDiff figures (PNG / PDF) and save them to a directory.
+"""Generate per-species single-source VisDiff figures (PNG / PDF).
 
-Usage examples
---------------
-# All species in the default CSV → PNG files in CACHE_PATH/visdiff_figures/
-./sat_mmocc/steps/09_visdiff_figures.py
-
-# Specific CSV, NAIP imagery, PDF output
-./sat_mmocc/steps/09_visdiff_figures.py \
-    --visdiff_csv=/path/to/visdiff_naip_wi_prompt2.csv \
-    --imagery_source=naip \
-    --fmt=pdf
-
-# Single species
-./sat_mmocc/steps/09_visdiff_figures.py \
-    --species_ids=00804e75-09ef-44e5-8984-85e365377d47
+Each figure contains one source block with:
+  - 10 Group A images arranged in two sub-rows
+  - 10 Group B images arranged in two sub-rows
+  - a readable VisDiff description panel
 """
 
 import logging
-import os
+import textwrap
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -45,6 +35,7 @@ from sat_mmocc.config import (
     default_image_backbone,
     default_sat_backbone,
 )
+from sat_mmocc.imagery_lookups import get_imagery_source_label, load_imagery_lookup
 from sat_mmocc.interpretability_utils import (
     compute_site_scores,
     load_fit_results,
@@ -63,141 +54,235 @@ DEFAULT_OUTPUT_DIR = cache_path / "visdiff_naip_figures_prompt2"
 MODALITIES = ["image", "sat", "covariates"]
 TOP_K = 50
 UNIQUE_WEIGHT = 2.0
-N_IMAGES = 5
+N_IMAGES = 10
 N_HYPOTHESES = 15
 THUMB_SIZE = (192, 192)
-
-IMAGERY_SOURCE_PNG_DIRS = {
-    "sentinel": cache_path / "sat_wi_rgb_images_png",
-    "naip": cache_path / "naip_wi_images_png",
-}
+DESCRIPTION_WRAP_WIDTH = 44
+DESCRIPTION_FONT_SIZE = 11
+IMAGE_SUBROWS = 2
+IMAGES_PER_SUBROW = 5
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in km between two (lat, lon) points."""
-    R = 6371.0
+    radius_km = 6371.0
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi = np.radians(lat2 - lat1)
     dlam = np.radians(lon2 - lon1)
     a = np.sin(dphi / 2) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlam / 2) ** 2
-    return 2 * R * np.arcsin(np.sqrt(a))
+    return 2 * radius_km * np.arcsin(np.sqrt(a))
 
 
-def _unique_location_paths(
+def _select_unique_locations(
     df: pd.DataFrame,
     n: int,
-    min_dist_km: float = 50.0,
+    min_dist_km: float = 0.0,
+    required_locs: set[str] | None = None,
+    exclude_locs: set[str] | None = None,
 ) -> List[str]:
-    """Return up to n image paths from spatially spread locations.
-
-    Selects images in rank order, skipping any site that is within
-    *min_dist_km* kilometres of an already-selected site.
-    Falls back gracefully when Latitude/Longitude are missing.
-    """
+    """Return up to *n* unique loc_ids in rank order, optionally filtered."""
     has_coords = "Latitude" in df.columns and "Longitude" in df.columns
-    seen_locs: set = set()
-    selected_coords: List[tuple] = []  # (lat, lon) of accepted sites
-    paths: List[str] = []
+    excluded = exclude_locs or set()
+    selected_coords: List[tuple[float, float]] = []
+    loc_ids: List[str] = []
 
     for _, row in df.iterrows():
-        loc = row.get("loc_id")
-        if loc in seen_locs:
+        loc = str(row.get("loc_id", "")).strip()
+        if not loc or loc in excluded or loc in loc_ids:
+            continue
+        if required_locs is not None and loc not in required_locs:
             continue
 
         if has_coords and min_dist_km > 0 and selected_coords:
             try:
                 lat, lon = float(row["Latitude"]), float(row["Longitude"])
                 too_close = any(
-                    _haversine_km(lat, lon, slat, slon) < min_dist_km
-                    for slat, slon in selected_coords
+                    _haversine_km(lat, lon, sel_lat, sel_lon) < min_dist_km
+                    for sel_lat, sel_lon in selected_coords
                 )
                 if too_close:
                     continue
                 selected_coords.append((lat, lon))
             except (TypeError, ValueError):
-                pass  # missing coords — include anyway
+                pass
+        elif has_coords:
+            try:
+                selected_coords.append((float(row["Latitude"]), float(row["Longitude"])))
+            except (TypeError, ValueError):
+                pass
 
-        seen_locs.add(loc)
-        paths.append(str(row["image_path"]))
-        if len(paths) == n:
+        loc_ids.append(loc)
+        if len(loc_ids) == n:
             break
 
-    return paths
+    return loc_ids
 
 
-def _load_thumb(path: str, size: tuple = THUMB_SIZE) -> Optional[np.ndarray]:
+def _paths_for_source(
+    loc_ids: List[str],
+    df: pd.DataFrame,
+    fallback_lookup: dict[str, str],
+) -> List[str]:
+    """Map *loc_ids* to image paths, preferring ranked rows then falling back to lookup."""
+    loc_to_path: dict[str, str] = {}
+    if not df.empty:
+        for _, row in df.iterrows():
+            loc = str(row.get("loc_id", "")).strip()
+            if loc and loc not in loc_to_path:
+                loc_to_path[loc] = str(row.get("image_path", ""))
+    return [loc_to_path.get(loc, fallback_lookup.get(loc, "")) for loc in loc_ids]
+
+
+def _load_thumb(path: str, size: tuple[int, int] = THUMB_SIZE) -> Optional[np.ndarray]:
     try:
-        img = Image.open(path).convert("RGB").resize(size, Image.LANCZOS)
-        return np.asarray(img)
+        image = Image.open(path).convert("RGB").resize(size, Image.LANCZOS)
+        return np.asarray(image)
     except Exception:
         return None
 
 
-def _plot_image_row(axes_row: list, paths: List[str], color: str, label: str) -> None:
-    for col_idx, ax in enumerate(axes_row):
-        if col_idx < len(paths):
-            arr = _load_thumb(paths[col_idx])
-            if arr is not None:
-                ax.imshow(arr)
-                ax.set_title(Path(paths[col_idx]).stem[:24], fontsize=6, color="dimgray")
-            else:
-                ax.text(0.5, 0.5, "missing", ha="center", va="center", fontsize=8)
-        else:
-            ax.set_visible(False)
-        ax.axis("off")
-        for spine in ax.spines.values():
-            spine.set_edgecolor(color)
-            spine.set_linewidth(2)
-            spine.set_visible(True)
-    if axes_row:
-        axes_row[0].set_ylabel(
-            label, fontsize=9, color=color, fontweight="bold",
-            rotation=90, labelpad=4,
-        )
+def _plot_thumb(ax: plt.Axes, path: str, color: str) -> None:
+    thumb = _load_thumb(path)
+    if thumb is not None:
+        ax.imshow(thumb)
+    else:
+        ax.text(0.5, 0.5, "missing", ha="center", va="center", fontsize=8)
+    ax.axis("off")
+    ax.set_aspect("equal")
+    for spine in ax.spines.values():
+        spine.set_edgecolor(color)
+        spine.set_linewidth(2)
+        spine.set_visible(True)
 
 
-def _plot_hypotheses(ax: plt.Axes, visdiff_df: pd.DataFrame, taxon_id: str, n: int) -> None:
-    df = (
-        visdiff_df[visdiff_df["taxon_id"] == str(taxon_id)]
-        .sort_values("auroc", ascending=False)
-        .head(n)
+def _plot_row_label(ax: plt.Axes, label: str, color: str) -> None:
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        label,
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+        color=color,
+        rotation=90,
+        transform=ax.transAxes,
     )
-    if df.empty:
-        ax.text(0.5, 0.5, "No hypotheses", ha="center", va="center")
-        ax.axis("off")
-        return
 
-    auroc_vals = df["auroc"].values[::-1]
-    labels = [
-        (lbl if len(lbl) <= 60 else lbl[:59] + "…")
-        for lbl in df["difference"].values[::-1]
+
+def _plot_group_label(ax: plt.Axes, label: str, color: str) -> None:
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        label,
+        ha="center",
+        va="center",
+        fontsize=10,
+        fontweight="bold",
+        color=color,
+        transform=ax.transAxes,
+    )
+
+
+def _get_visdiff_panel_text(
+    visdiff_df: pd.DataFrame,
+    taxon_id: str,
+    n: int,
+    wrap_width: int = DESCRIPTION_WRAP_WIDTH,
+) -> tuple[str, int]:
+    subset = visdiff_df[visdiff_df["taxon_id"] == str(taxon_id)].copy()
+    if subset.empty:
+        body = "No VisDiff descriptions found."
+        return body, 1
+
+    subset["difference"] = subset["difference"].fillna("").astype(str).str.strip()
+    subset = subset[subset["difference"] != ""]
+    subset["auroc"] = pd.to_numeric(subset["auroc"], errors="coerce")
+    subset = subset.sort_values("auroc", ascending=False)
+    subset = subset.drop_duplicates(subset="difference").head(n)
+
+    if subset.empty:
+        body = "No VisDiff descriptions found."
+        return body, 1
+
+    blocks = [
+        textwrap.fill(
+            f"{idx}. {row.difference}",
+            width=wrap_width,
+            subsequent_indent="    ",
+        )
+        for idx, row in enumerate(subset.itertuples(index=False), start=1)
+    ]
+    body = "\n\n".join(blocks)
+    return body, body.count("\n") + 1
+
+
+def _estimate_row_height(description_line_count: int) -> float:
+    return max(3.0, 1.8 + 0.20 * description_line_count)
+
+
+def _split_paths_into_subrows(
+    paths: List[str],
+    images_per_subrow: int = IMAGES_PER_SUBROW,
+) -> List[List[str]]:
+    return [
+        paths[start : start + images_per_subrow]
+        for start in range(0, len(paths), images_per_subrow)
     ]
 
-    cmap = plt.cm.RdYlGn
-    colors = [cmap(v) for v in np.clip((auroc_vals - 0.4) / 0.4, 0, 1)]
-    bars = ax.barh(range(len(labels)), auroc_vals, color=colors, edgecolor="white")
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels(labels, fontsize=8)
-    ax.set_xlabel("AUROC")
-    ax.axvline(0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.set_xlim(
-        left=max(0.0, float(auroc_vals.min()) - 0.05),
-        right=min(1.0, float(auroc_vals.max()) + 0.05),
+
+def _plot_description_panel(
+    ax: plt.Axes,
+    title: str,
+    body: str,
+    font_size: float = DESCRIPTION_FONT_SIZE,
+) -> None:
+    ax.axis("off")
+    ax.text(
+        0.0,
+        1.0,
+        title,
+        ha="left",
+        va="top",
+        fontsize=font_size + 1,
+        fontweight="bold",
+        transform=ax.transAxes,
     )
-    ax.set_title("Top VisDiff hypotheses (Group A > Group B)", fontsize=9)
-    for bar, val in zip(bars, auroc_vals):
-        ax.text(
-            bar.get_width() + 0.002, bar.get_y() + bar.get_height() / 2,
-            f"{val:.3f}", va="center", fontsize=7.5,
-        )
+    ax.text(
+        0.0,
+        0.92,
+        body,
+        ha="left",
+        va="top",
+        fontsize=font_size,
+        linespacing=1.35,
+        transform=ax.transAxes,
+    )
+
+
+def _plot_column_header(ax: plt.Axes, label: str) -> None:
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        label,
+        ha="center",
+        va="center",
+        fontsize=11,
+        fontweight="bold",
+        transform=ax.transAxes,
+    )
 
 
 def generate_species_figure(
     taxon_id: str,
     visdiff_df: pd.DataFrame,
-    png_dir: Path,
+    image_lookup: pd.DataFrame,
+    imagery_label: str,
     modalities: List[str] = MODALITIES,
     image_backbone: str = default_image_backbone,
     sat_backbone: str = default_sat_backbone,
@@ -206,7 +291,7 @@ def generate_species_figure(
     n_images: int = N_IMAGES,
     n_hypotheses: int = N_HYPOTHESES,
     mode: str = "standard",
-    min_dist_km: float = 50.0,
+    min_dist_km: float = 0.0,
 ) -> Optional[plt.Figure]:
     """Return a combined matplotlib Figure for a single taxon, or None on failure."""
     tid = str(taxon_id)
@@ -222,12 +307,9 @@ def generate_species_figure(
     site_scores, display_name = compute_site_scores(
         tid, res_mod, res_img, res_sat, fit_results
     )
-    site_scores["image_path"] = site_scores["loc_id"].apply(
-        lambda lid: str(png_dir / f"{lid}.png")
-    )
-    site_scores["image_exists"] = site_scores["image_path"].apply(
-        lambda p: Path(p).exists()
-    )
+    site_scores = site_scores.join(image_lookup, on="loc_id", how="left")
+    site_scores["image_exists"] = site_scores["image_exists"].fillna(False).astype(bool)
+    site_scores["image_path"] = site_scores["image_path"].fillna("").astype(str)
 
     pos_df, neg_df = rank_image_groups(
         site_scores,
@@ -239,34 +321,70 @@ def generate_species_figure(
         test=False,
     )
 
-    pos_paths = _unique_location_paths(pos_df, n_images, min_dist_km=min_dist_km)
-    neg_paths = _unique_location_paths(neg_df, n_images, min_dist_km=min_dist_km)
+    image_path_lookup = {
+        str(loc_id): str(row["image_path"])
+        for loc_id, row in image_lookup.iterrows()
+    }
+    pos_locs = _select_unique_locations(pos_df, n_images, min_dist_km=min_dist_km)
+    neg_locs = _select_unique_locations(neg_df, n_images, min_dist_km=min_dist_km)
+    pos_paths = _paths_for_source(pos_locs, pos_df, image_path_lookup)
+    neg_paths = _paths_for_source(neg_locs, neg_df, image_path_lookup)
 
-    fig = plt.figure(figsize=(n_images * 2.2 + 10, max(7, 0.48 * n_hypotheses + 4)))
+    description_body, description_lines = _get_visdiff_panel_text(
+        visdiff_df,
+        tid,
+        n_hypotheses,
+    )
+
+    pos_path_rows = _split_paths_into_subrows(pos_paths)
+    neg_path_rows = _split_paths_into_subrows(neg_paths)
+    source_height = _estimate_row_height(description_lines + 4.5)
+    fig = plt.figure(figsize=(20, source_height + 1.4))
     fig.suptitle(
         f"{display_name}  (taxon {tid}, mode={mode})",
-        fontsize=13, fontweight="bold", y=1.00,
+        fontsize=14,
+        fontweight="bold",
+        y=0.99,
     )
 
+    image_columns = min(IMAGES_PER_SUBROW, max(1, n_images))
+    width_ratios = [1.1, 1.7] + [1.0] * image_columns + [7.0]
     outer = gridspec.GridSpec(
-        1, 2, figure=fig,
-        width_ratios=[n_images * 2.2, 10], wspace=0.3,
+        5,
+        image_columns + 3,
+        figure=fig,
+        width_ratios=width_ratios,
+        height_ratios=[
+            0.45,
+            source_height / 4,
+            source_height / 4,
+            source_height / 4,
+            source_height / 4,
+        ],
+        wspace=0.04,
+        hspace=0.10,
     )
-    left_gs = gridspec.GridSpecFromSubplotSpec(
-        2, n_images, subplot_spec=outer[0], hspace=0.06, wspace=0.04,
+
+    _plot_column_header(fig.add_subplot(outer[0, 0]), "Source")
+    _plot_column_header(fig.add_subplot(outer[0, 1]), "Group")
+    _plot_column_header(fig.add_subplot(outer[0, 2 : 2 + image_columns]), "Example images")
+    _plot_column_header(fig.add_subplot(outer[0, -1]), "VisDiff descriptions")
+
+    _plot_row_label(fig.add_subplot(outer[1:, 0]), imagery_label, "#1565C0")
+    _plot_group_label(fig.add_subplot(outer[1:3, 1]), "Likely\noccupied", "#2196F3")
+    _plot_group_label(fig.add_subplot(outer[3:5, 1]), "Likely\nunoccupied", "#F44336")
+    for row_offset, row_paths in enumerate(pos_path_rows[:IMAGE_SUBROWS]):
+        for col_idx, path in enumerate(row_paths[:image_columns]):
+            _plot_thumb(fig.add_subplot(outer[1 + row_offset, 2 + col_idx]), path, "#2196F3")
+    for row_offset, row_paths in enumerate(neg_path_rows[:IMAGE_SUBROWS]):
+        for col_idx, path in enumerate(row_paths[:image_columns]):
+            _plot_thumb(fig.add_subplot(outer[3 + row_offset, 2 + col_idx]), path, "#F44336")
+    _plot_description_panel(
+        fig.add_subplot(outer[1:, -1]),
+        f"{imagery_label} top {n_hypotheses} VisDiff descriptions",
+        description_body,
     )
 
-    for row_idx, (label, color, paths) in enumerate([
-        ("Group A — Present", "#2196F3", pos_paths),
-        ("Group B — Absent",  "#F44336", neg_paths),
-    ]):
-        axes_row = [fig.add_subplot(left_gs[row_idx, c]) for c in range(n_images)]
-        _plot_image_row(axes_row, paths, color, label)
-
-    ax_hyp = fig.add_subplot(outer[1])
-    _plot_hypotheses(ax_hyp, visdiff_df, tid, n_hypotheses)
-
-    plt.tight_layout()
     return fig
 
 
@@ -286,31 +404,12 @@ def main(
     n_images: int = N_IMAGES,
     n_hypotheses: int = N_HYPOTHESES,
     mode: str = "standard",
-    min_dist_km: float = 50.0,
+    min_dist_km: float = 0.0,
     dpi: int = 150,
     overwrite: bool = False,
+    png_dir: str | Path | None = None,
 ) -> None:
-    """Render one figure per species and save to *output_dir*.
-
-    Parameters
-    ----------
-    visdiff_csv:    Path to VisDiff descriptions CSV.
-    imagery_source: "sentinel" or "naip" (controls which PNG directory is used).
-    output_dir:     Directory to write figures into (created if needed).
-    fmt:            Output format — "png" or "pdf".
-    species_ids:    Comma-separated taxon IDs, or omit to process all species in CSV.
-    modalities:     Comma-separated list of modalities (must match fit results).
-    image_backbone: Image backbone name (must match fit results).
-    sat_backbone:   Satellite backbone name (must match fit results).
-    top_k:          Number of top/bottom sites to use per group.
-    unique_weight:  Uniqueness weight for "unique" ranking mode.
-    n_images:       Thumbnails per group row
-    n_hypotheses:   Top-N hypotheses displayed in bar chart.
-    mode:           Ranking mode: "standard" or "unique".
-    min_dist_km:    Minimum great-circle distance (km) between displayed sites (default 50).
-    dpi:            Resolution for PNG output.
-    overwrite:      Re-render even if output file already exists.
-    """
+    """Render one figure per species and save to *output_dir*."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -320,8 +419,10 @@ def main(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    png_dir = IMAGERY_SOURCE_PNG_DIRS.get(
-        imagery_source, cache_path / f"{imagery_source}_images_png"
+    imagery_label = get_imagery_source_label(imagery_source)
+    image_lookup = load_imagery_lookup(
+        imagery_source,
+        png_dir=Path(png_dir) if png_dir is not None else None,
     )
     mod_list = [m.strip() for m in modalities.split(",") if m.strip()]
 
@@ -360,7 +461,8 @@ def main(
             fig = generate_species_figure(
                 tid,
                 visdiff_df,
-                png_dir,
+                image_lookup,
+                imagery_label,
                 modalities=mod_list,
                 image_backbone=image_backbone,
                 sat_backbone=sat_backbone,

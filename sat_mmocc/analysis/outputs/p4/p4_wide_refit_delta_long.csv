@@ -1,0 +1,161 @@
+taxon_id,scientific_name,common_name,metric,model,model_display_name,delta,baseline,target
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.1709623377586676,0.2596842495012144,0.0887219117425468
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,lppd_test_norm,refit_sentinel,Sentinel GRAFT,0.06644193706064339,0.1146105358560128,0.1810524729166562
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,lppd_test_norm,refit_sentinel,Sentinel GRAFT,0.05336273094370689,0.186172000975591,0.2395347319192979
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.053469806121272306,-0.0296678404771369,-0.0831376465984092
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.165571620216672,0.3677914901793938,0.2022198699627218
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,lppd_test_norm,refit_sentinel,Sentinel GRAFT,0.07735954743788137,0.2556601060916156,0.333019653529497
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.0972292684767082,0.0539973878098839,-0.0432318806668243
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.288101783888592,0.6517368868684688,0.3636351029798768
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.031742873426683416,0.3669732939977477,0.3352304205710643
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.25625257227838505,-0.5638046133527783,-0.8200571856311634
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.2370183671830333,0.0572778528474737,-0.1797405143355596
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.1473352247554371,0.3557151055342403,0.2083798807788032
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,lppd_test_norm,refit_sentinel,Sentinel GRAFT,0.1945648320067737,0.285261275611565,0.4798261076183387
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,lppd_test_norm,refit_sentinel,Sentinel GRAFT,0.1665212922683879,-0.1329244606488264,0.0335968316195615
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,lppd_test_norm,refit_sentinel,Sentinel GRAFT,1.0056203794966367,-0.5684308537776417,0.437189525718995
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,lppd_test_norm,refit_sentinel,Sentinel GRAFT,-0.18522172830355632,0.3584136312869886,0.1731919029834323
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.08303854510957259,0.3701526584075659,0.2871141132979933
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.05581669698336139,0.3209899119640143,0.2651732149806529
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,biolith_ap_test,refit_sentinel,Sentinel GRAFT,0.1128018791614947,0.408938642910563,0.5217405220720577
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.04203154057406083,0.4721156647915961,0.4300841242175353
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.1154778204338055,0.3463717013821609,0.2308938809483554
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.0028843122620146044,0.2182150759456376,0.215330763683623
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.042275536088899196,0.2771838532656561,0.2349083171767569
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.16151390537728,0.4670220490008294,0.3055081436235494
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.012101372210408634,0.7674969718569562,0.7553955996465476
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.018906087181721182,0.2048778439672572,0.185971756785536
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.00036322394258991864,0.3547216304340851,0.3543584064914952
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.0576154986367986,0.7580747905656094,0.7004592919288108
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,biolith_ap_test,refit_sentinel,Sentinel GRAFT,0.03957611222686791,0.3596033294798287,0.3991794417066966
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,biolith_ap_test,refit_sentinel,Sentinel GRAFT,0.0028470466325274946,0.4053250980711755,0.408172144703703
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,biolith_ap_test,refit_sentinel,Sentinel GRAFT,0.2017650923795626,0.2250541388199163,0.4268192311994789
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,biolith_ap_test,refit_sentinel,Sentinel GRAFT,-0.03235505957895646,0.9264034731511736,0.8940484135722171
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.024741251414257648,0.8052738046497705,0.7805325532355128
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.028004388643527722,0.7126406362390239,0.6846362475954961
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,0.05617834394904464,0.7089171974522293,0.7650955414012739
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.062187465733624325,0.5814777156414166,0.5192902499077923
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.1296985815602838,0.7031028368794326,0.5734042553191488
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,0.012043825188085888,0.706561694566616,0.7186055197547019
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.04797454394243461,0.6944864493500389,0.6465119054076043
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.11007073309173465,0.8161818320744008,0.7061110989826661
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.012053218228104234,0.8168969635646348,0.8048437453365306
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.09725448465894093,0.372896092604368,0.2756416079454271
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.0255754208301594,0.5846111335155562,0.5590357126853968
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.04975123446222174,0.7675683988160551,0.7178171643538334
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,0.0466334551458466,0.774278009556623,0.8209114647024696
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.007211074426156983,0.645844433936312,0.638633359510155
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,0.26960297766749375,0.6130272952853598,0.8826302729528536
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,biolith_roc_auc_test,refit_sentinel,Sentinel GRAFT,-0.04851293761663522,0.8222307240000478,0.7737177863834126
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.0870856182160965,0.3470526715582092,0.2599670533421127
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.023663743527660014,0.2631451484646351,0.2394814049369751
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,lr_map_test,refit_sentinel,Sentinel GRAFT,0.07769662118127418,0.4039255776876261,0.4816221988689003
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.09350438169300962,0.4691175787168954,0.3756131970238858
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.18914071466798538,0.5106111780405669,0.3214704633725815
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.03903655576531859,0.257354955575981,0.2183183998106624
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.0326151986280854,0.272358148855122,0.2397429502270366
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,lr_map_test,refit_sentinel,Sentinel GRAFT,0.0777495446659544,0.3837922315011167,0.4615417761670711
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.0007716434305199416,0.7571375947025961,0.7563659512720762
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,lr_map_test,refit_sentinel,Sentinel GRAFT,0.0027041148541500915,0.1796774061987171,0.1823815210528672
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.015572884073694615,0.3525681690734787,0.3369952849997841
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.06652063664711316,0.7536126965387646,0.6870920598916515
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,lr_map_test,refit_sentinel,Sentinel GRAFT,0.024550602219969797,0.3575602113425238,0.3821108135624936
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,lr_map_test,refit_sentinel,Sentinel GRAFT,0.024459488673792995,0.3929693295289106,0.4174288182027036
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,lr_map_test,refit_sentinel,Sentinel GRAFT,0.08292381973353308,0.3542164131403122,0.4371402328738453
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,lr_map_test,refit_sentinel,Sentinel GRAFT,-0.003251323562465158,0.8985823555137087,0.8953310319512435
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.04774262379398278,0.2719373703149104,0.2241947465209276
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.045370746295438996,0.0327903183200172,-0.0125804279754218
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,lr_mcc_test,refit_sentinel,Sentinel GRAFT,0.2463889127483838,0.0,0.2463889127483838
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.0962244614727088,0.1190941327432658,0.022869671270557
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,lr_mcc_test,refit_sentinel,Sentinel GRAFT,0.0,0.0,0.0
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,lr_mcc_test,refit_sentinel,Sentinel GRAFT,0.0192902292686815,0.0,0.0192902292686815
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.0283184977126185,0.0201310503558026,-0.0081874473568159
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,lr_mcc_test,refit_sentinel,Sentinel GRAFT,0.2544590185198908,0.257279339494729,0.5117383580146198
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.004260970957306098,0.4149669616512416,0.4107059906939355
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.023741337785911587,-0.3630214466474385,-0.3867627844333501
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.0382482110039162,0.0350790355820484,-0.0031691754218678
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.1185245662918985,0.3389474418236137,0.2204228755317152
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.05083929852029062,0.3275913025093544,0.2767520039890638
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,lr_mcc_test,refit_sentinel,Sentinel GRAFT,0.0595483738170512,0.0090107998740536,0.0685591736911048
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,lr_mcc_test,refit_sentinel,Sentinel GRAFT,0.0,0.0,0.0
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,lr_mcc_test,refit_sentinel,Sentinel GRAFT,-0.1135777305401483,0.4790843974242746,0.3655066668841263
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,lppd_test_norm,refit_naip,NAIP GRAFT,-0.1709623377586676,0.2596842495012144,0.0887219117425468
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,lppd_test_norm,refit_naip,NAIP GRAFT,0.06644193706064339,0.1146105358560128,0.1810524729166562
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,lppd_test_norm,refit_naip,NAIP GRAFT,0.05336273094370689,0.186172000975591,0.2395347319192979
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,lppd_test_norm,refit_naip,NAIP GRAFT,-0.053469806121272306,-0.0296678404771369,-0.0831376465984092
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,lppd_test_norm,refit_naip,NAIP GRAFT,-0.165571620216672,0.3677914901793938,0.2022198699627218
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,lppd_test_norm,refit_naip,NAIP GRAFT,0.07735954743788137,0.2556601060916156,0.333019653529497
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,lppd_test_norm,refit_naip,NAIP GRAFT,-0.0972292684767082,0.0539973878098839,-0.0432318806668243
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,lppd_test_norm,refit_naip,NAIP GRAFT,-0.288101783888592,0.6517368868684688,0.3636351029798768
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,lppd_test_norm,refit_naip,NAIP GRAFT,-0.031742873426683416,0.3669732939977477,0.3352304205710643
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,lppd_test_norm,refit_naip,NAIP GRAFT,-0.25625257227838505,-0.5638046133527783,-0.8200571856311634
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,lppd_test_norm,refit_naip,NAIP GRAFT,-0.2370183671830333,0.0572778528474737,-0.1797405143355596
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,lppd_test_norm,refit_naip,NAIP GRAFT,-0.1473352247554371,0.3557151055342403,0.2083798807788032
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,lppd_test_norm,refit_naip,NAIP GRAFT,0.1945648320067737,0.285261275611565,0.4798261076183387
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,lppd_test_norm,refit_naip,NAIP GRAFT,0.1665212922683879,-0.1329244606488264,0.0335968316195615
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,lppd_test_norm,refit_naip,NAIP GRAFT,1.0056203794966367,-0.5684308537776417,0.437189525718995
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,lppd_test_norm,refit_naip,NAIP GRAFT,-0.18522172830355632,0.3584136312869886,0.1731919029834323
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,biolith_ap_test,refit_naip,NAIP GRAFT,-0.08303854510957259,0.3701526584075659,0.2871141132979933
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,biolith_ap_test,refit_naip,NAIP GRAFT,-0.05581669698336139,0.3209899119640143,0.2651732149806529
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,biolith_ap_test,refit_naip,NAIP GRAFT,0.1128018791614947,0.408938642910563,0.5217405220720577
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,biolith_ap_test,refit_naip,NAIP GRAFT,-0.04203154057406083,0.4721156647915961,0.4300841242175353
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,biolith_ap_test,refit_naip,NAIP GRAFT,-0.1154778204338055,0.3463717013821609,0.2308938809483554
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,biolith_ap_test,refit_naip,NAIP GRAFT,-0.0028843122620146044,0.2182150759456376,0.215330763683623
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,biolith_ap_test,refit_naip,NAIP GRAFT,-0.042275536088899196,0.2771838532656561,0.2349083171767569
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,biolith_ap_test,refit_naip,NAIP GRAFT,-0.16151390537728,0.4670220490008294,0.3055081436235494
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,biolith_ap_test,refit_naip,NAIP GRAFT,-0.012101372210408634,0.7674969718569562,0.7553955996465476
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,biolith_ap_test,refit_naip,NAIP GRAFT,-0.018906087181721182,0.2048778439672572,0.185971756785536
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,biolith_ap_test,refit_naip,NAIP GRAFT,-0.00036322394258991864,0.3547216304340851,0.3543584064914952
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,biolith_ap_test,refit_naip,NAIP GRAFT,-0.0576154986367986,0.7580747905656094,0.7004592919288108
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,biolith_ap_test,refit_naip,NAIP GRAFT,0.03957611222686791,0.3596033294798287,0.3991794417066966
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,biolith_ap_test,refit_naip,NAIP GRAFT,0.0028470466325274946,0.4053250980711755,0.408172144703703
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,biolith_ap_test,refit_naip,NAIP GRAFT,0.2017650923795626,0.2250541388199163,0.4268192311994789
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,biolith_ap_test,refit_naip,NAIP GRAFT,-0.03235505957895646,0.9264034731511736,0.8940484135722171
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.024741251414257648,0.8052738046497705,0.7805325532355128
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.028004388643527722,0.7126406362390239,0.6846362475954961
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,biolith_roc_auc_test,refit_naip,NAIP GRAFT,0.05617834394904464,0.7089171974522293,0.7650955414012739
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.062187465733624325,0.5814777156414166,0.5192902499077923
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.1296985815602838,0.7031028368794326,0.5734042553191488
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,biolith_roc_auc_test,refit_naip,NAIP GRAFT,0.012043825188085888,0.706561694566616,0.7186055197547019
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.04797454394243461,0.6944864493500389,0.6465119054076043
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.11007073309173465,0.8161818320744008,0.7061110989826661
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.012053218228104234,0.8168969635646348,0.8048437453365306
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.09725448465894093,0.372896092604368,0.2756416079454271
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.0255754208301594,0.5846111335155562,0.5590357126853968
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.04975123446222174,0.7675683988160551,0.7178171643538334
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,biolith_roc_auc_test,refit_naip,NAIP GRAFT,0.0466334551458466,0.774278009556623,0.8209114647024696
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.007211074426156983,0.645844433936312,0.638633359510155
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,biolith_roc_auc_test,refit_naip,NAIP GRAFT,0.26960297766749375,0.6130272952853598,0.8826302729528536
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,biolith_roc_auc_test,refit_naip,NAIP GRAFT,-0.04851293761663522,0.8222307240000478,0.7737177863834126
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,lr_map_test,refit_naip,NAIP GRAFT,-0.0870856182160965,0.3470526715582092,0.2599670533421127
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,lr_map_test,refit_naip,NAIP GRAFT,-0.023663743527660014,0.2631451484646351,0.2394814049369751
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,lr_map_test,refit_naip,NAIP GRAFT,0.07769662118127418,0.4039255776876261,0.4816221988689003
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,lr_map_test,refit_naip,NAIP GRAFT,-0.09350438169300962,0.4691175787168954,0.3756131970238858
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,lr_map_test,refit_naip,NAIP GRAFT,-0.18914071466798538,0.5106111780405669,0.3214704633725815
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,lr_map_test,refit_naip,NAIP GRAFT,-0.03903655576531859,0.257354955575981,0.2183183998106624
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,lr_map_test,refit_naip,NAIP GRAFT,-0.0326151986280854,0.272358148855122,0.2397429502270366
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,lr_map_test,refit_naip,NAIP GRAFT,0.0777495446659544,0.3837922315011167,0.4615417761670711
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,lr_map_test,refit_naip,NAIP GRAFT,-0.0007716434305199416,0.7571375947025961,0.7563659512720762
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,lr_map_test,refit_naip,NAIP GRAFT,0.0027041148541500915,0.1796774061987171,0.1823815210528672
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,lr_map_test,refit_naip,NAIP GRAFT,-0.015572884073694615,0.3525681690734787,0.3369952849997841
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,lr_map_test,refit_naip,NAIP GRAFT,-0.06652063664711316,0.7536126965387646,0.6870920598916515
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,lr_map_test,refit_naip,NAIP GRAFT,0.024550602219969797,0.3575602113425238,0.3821108135624936
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,lr_map_test,refit_naip,NAIP GRAFT,0.024459488673792995,0.3929693295289106,0.4174288182027036
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,lr_map_test,refit_naip,NAIP GRAFT,0.08292381973353308,0.3542164131403122,0.4371402328738453
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,lr_map_test,refit_naip,NAIP GRAFT,-0.003251323562465158,0.8985823555137087,0.8953310319512435
+436ddfdd-bc43-44c3-a25d-34671d3430a0,Ursus americanus,american black bear,lr_mcc_test,refit_naip,NAIP GRAFT,-0.04774262379398278,0.2719373703149104,0.2241947465209276
+ba76d46e-25de-45e2-90a8-bd279b650f7c,Lynx rufus,bobcat,lr_mcc_test,refit_naip,NAIP GRAFT,-0.045370746295438996,0.0327903183200172,-0.0125804279754218
+5acf63fb-339d-42b1-af7e-95f6151ae5fb,Pecari tajacu,collared peccary,lr_mcc_test,refit_naip,NAIP GRAFT,0.2463889127483838,0.0,0.2463889127483838
+aaf3b049-36e6-46dd-9a07-8a580e9618b7,Canis latrans,coyote,lr_mcc_test,refit_naip,NAIP GRAFT,-0.0962244614727088,0.1190941327432658,0.022869671270557
+f67c4346-bbbd-43d5-9b19-b541d493019b,Tamiasciurus douglasii,douglas's squirrel,lr_mcc_test,refit_naip,NAIP GRAFT,0.0,0.0,0.0
+1db1c6e2-2ea9-45a6-ab69-a730133298eb,Tamias striatus,eastern chipmunk,lr_mcc_test,refit_naip,NAIP GRAFT,0.0192902292686815,0.0,0.0192902292686815
+667a4650-a141-4c4e-844e-58cdeaeb4ae1,Sylvilagus floridanus,eastern cottontail,lr_mcc_test,refit_naip,NAIP GRAFT,-0.0283184977126185,0.0201310503558026,-0.0081874473568159
+e07c537d-08b8-4c31-9768-51e4adf5a5ab,Sciurus niger,eastern fox squirrel,lr_mcc_test,refit_naip,NAIP GRAFT,0.2544590185198908,0.257279339494729,0.5117383580146198
+86f5b978-4f30-40cc-bd08-be9e3fba27a0,Sciurus carolinensis,eastern gray squirrel,lr_mcc_test,refit_naip,NAIP GRAFT,-0.004260970957306098,0.4149669616512416,0.4107059906939355
+febff896-db40-4ac8-bcfe-5bb99a600950,Odocoileus hemionus,mule deer,lr_mcc_test,refit_naip,NAIP GRAFT,-0.023741337785911587,-0.3630214466474385,-0.3867627844333501
+07843615-e1fc-49d8-9821-fd1d7ff2e773,Dasypus novemcinctus,nine-banded armadillo,lr_mcc_test,refit_naip,NAIP GRAFT,-0.0382482110039162,0.0350790355820484,-0.0031691754218678
+b57debc1-dff2-48d3-a400-f2b5021e71b0,Procyon lotor,northern raccoon,lr_mcc_test,refit_naip,NAIP GRAFT,-0.1185245662918985,0.3389474418236137,0.2204228755317152
+ac0e8ba7-7261-4d17-8645-11ed3d02165a,Vulpes vulpes,red fox,lr_mcc_test,refit_naip,NAIP GRAFT,-0.05083929852029062,0.3275913025093544,0.2767520039890638
+87be3a5c-e60a-4e7e-88c7-21544914d067,Didelphis virginiana,virginia opossum,lr_mcc_test,refit_naip,NAIP GRAFT,0.0595483738170512,0.0090107998740536,0.0685591736911048
+16ec4010-f175-4de7-8a99-85aadec3963b,Sciurus griseus,western gray squirrel,lr_mcc_test,refit_naip,NAIP GRAFT,0.0,0.0,0.0
+5c7ce479-8a45-40b3-ae21-7c97dfae22f5,Odocoileus virginianus,white-tailed deer,lr_mcc_test,refit_naip,NAIP GRAFT,-0.1135777305401483,0.4790843974242746,0.3655066668841263

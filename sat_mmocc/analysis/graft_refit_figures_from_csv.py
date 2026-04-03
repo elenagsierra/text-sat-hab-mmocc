@@ -42,7 +42,7 @@ MODEL_SPECS = [
 ]
 TARGET_SPECS = MODEL_SPECS[1:]
 DEFAULT_WIDE_CSV = (
-    Path(__file__).resolve().parent / "outputs" / "my_graft_compare_wide.csv"
+    Path(__file__).resolve().parent / "outputs" / "p4" / "p4_wide.csv"
 )
 ROBUST_LOWER_QUANTILE = 0.05
 ROBUST_UPPER_QUANTILE = 0.95

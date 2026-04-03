@@ -1,0 +1,11 @@
+model,model_display_name,metric,n_species,mean_delta,median_delta,improved_%
+refit_sentinel,Sentinel GRAFT,lppd_test_norm,16,-0.004314678949686075,-0.07534953729899024,37.5
+refit_sentinel,Sentinel GRAFT,biolith_ap_test,16,-0.016711841748688512,-0.02563057338033882,25.0
+refit_sentinel,Sentinel GRAFT,biolith_roc_auc_test,16,-0.01616104579110065,-0.02678990473684356,25.0
+refit_sentinel,Sentinel GRAFT,lr_map_test,16,-0.016317406805204614,-0.009412103818079887,37.5
+refit_sentinel,Sentinel GRAFT,lr_mcc_test,16,0.0008023806237366787,-0.026029917749265045,25.0
+refit_naip,NAIP GRAFT,lppd_test_norm,16,-0.004314678949686075,-0.07534953729899024,37.5
+refit_naip,NAIP GRAFT,biolith_ap_test,16,-0.016711841748688512,-0.02563057338033882,25.0
+refit_naip,NAIP GRAFT,biolith_roc_auc_test,16,-0.01616104579110065,-0.02678990473684356,25.0
+refit_naip,NAIP GRAFT,lr_map_test,16,-0.016317406805204614,-0.009412103818079887,37.5
+refit_naip,NAIP GRAFT,lr_mcc_test,16,0.0008023806237366787,-0.026029917749265045,25.0

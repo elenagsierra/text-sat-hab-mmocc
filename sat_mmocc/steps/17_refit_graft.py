@@ -16,6 +16,7 @@
 import math
 import os
 import pickle
+import re
 from dataclasses import dataclass
 from multiprocessing import Process, Queue
 from pathlib import Path
@@ -59,8 +60,8 @@ IMAGERY_SOURCE_GRAFT_BACKBONE_BASE: dict[str, str] = {
 IMAGERY_SOURCE_VISDIFF_FILES: dict[str, Path] = {
     "sentinel": cache_path / "visdiff_sat_sentinel2_wi_prompt2.csv",
     "naip": cache_path / "visdiff_sat_naip_wi_prompt2.csv",
-    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p2.csv",
-    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p2.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p4.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p4.csv",
 }
 
 # Expert descriptors are imagery-source-independent
@@ -123,8 +124,25 @@ def _get_descriptor_label(
     if source == "expert":
         return f"graft_expert{suffix}"
     if source == "visdiff":
-        return f"graft_visdiff_{imagery_source}{suffix}"
+        descriptor_tag = _get_descriptor_output_tag(source, imagery_source)
+        return f"graft_visdiff_{imagery_source}{descriptor_tag}{suffix}"
     raise ValueError(f"Unknown descriptor source: {source}")
+
+
+def _get_descriptor_output_tag(source: str, imagery_source: str) -> str:
+    """Return a compact filename tag derived from the descriptor CSV."""
+    if source != "visdiff":
+        return ""
+    descriptor_stem = _get_descriptor_file(source, imagery_source).stem
+    match = re.search(r"_(p\d+|prompt\d+)$", descriptor_stem, flags=re.IGNORECASE)
+    if match is not None:
+        return f"_{match.group(1).lower()}"
+
+    sanitized = re.sub(r"[^a-zA-Z0-9]+", "_", descriptor_stem).strip("_").lower()
+    prefix = f"visdiff_{imagery_source}".lower()
+    if sanitized.startswith(prefix):
+        sanitized = sanitized[len(prefix):].strip("_")
+    return f"_{sanitized}" if sanitized else ""
 
 
 @dataclass(frozen=True)
@@ -352,6 +370,7 @@ def fit(
     sat_backbone_label = _get_descriptor_label(
         descriptor_source, imagery_source, checkpoint_level
     )
+    descriptor_file = _get_descriptor_file(descriptor_source, imagery_source)
     species_results = dict(
         taxon_id=taxon_id,
         scientific_name=scientific_name,
@@ -362,6 +381,8 @@ def fit(
         sat_backbone_data=sat_backbone_data_result,
         checkpoint_level=checkpoint_level,
         descriptor_source=descriptor_source,
+        descriptor_file=str(descriptor_file),
+        descriptor_file_stem=descriptor_file.stem,
         limit_to_range=limit_to_range,
         modalities_scaler=modalities_scaler,
         modalities_pca=modalities_pca,

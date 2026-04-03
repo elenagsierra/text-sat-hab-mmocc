@@ -53,34 +53,48 @@ DEFAULT_MODALITY = "sat,covariates"
 ALLOWED_MODES = {"standard", "unique"}
 DEFAULT_MODES = ("standard", "unique")
 DEFAULT_CACHE_DIR = cache_path / "visdiff_cache"
-VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_sentinel2_wi_prompt3_noduplicates.csv"
-VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_naip_wi_prompt3_noduplicates.csv"
+VISDIFF_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_sentinel2_wi_prompt4.csv"
+VISDIFF_NAIP_DESCRIPTIONS_FILE = cache_path / "visdiff_sat_naip_wi_prompt4.csv"
 IMAGERY_SOURCE_OUTPUT_FILES = {
     "sentinel": VISDIFF_DESCRIPTIONS_FILE,
     "naip": VISDIFF_NAIP_DESCRIPTIONS_FILE,
-    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p3_noduplicates.csv",
-    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p3_noduplicates.csv",
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p4.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p4.csv",
 }
 DEFAULT_HYPOTHESES_LIMIT = None
-NEAR_DUPLICATE_JACCARD_THRESHOLD = 0.7
-NEAR_DUPLICATE_SEQ_THRESHOLD = 0.82
-NEAR_DUPLICATE_STOPWORDS = {
-    "a",
-    "an",
-    "the",
-    "with",
-    "and",
-    "of",
-    "in",
-    "on",
-    "to",
-    "from",
-    "very",
-    "more",
-    "less",
-    "continuous",
-    "scattered",
-    "patchy",
+MAX_HYPOTHESES_PER_RUN = 8
+MAX_HYPOTHESES_PER_SPECIES = 24
+GENERIC_DIFFERENCE_TOKENS = {
+    "a", "an", "the", "and", "or", "of", "in", "on", "to", "from", "with",
+    "within", "through", "around", "into", "across", "between", "along", "by",
+    "visible", "broad", "large", "small", "narrow", "wide", "dark", "light", "green",
+    "brown", "gray", "grey", "mixed", "mosaic", "mottled", "patchy", "scattered",
+    "continuous", "dense", "sparse", "closed", "open", "unbroken", "otherwise",
+    "otherwise", "dominated", "style", "like", "forming", "creating", "cover", "texture",
+    "surface", "tones", "tone", "areas", "area", "view", "visible", "running", "cutting",
+    "meeting", "stretching", "bordered", "bordering", "dotted", "same", "little", "few",
+    "more", "less", "minimal", "gently", "uneven", "flat", "tall", "low", "high",
+    "height", "layered", "tightly", "packed", "curving", "winding", "alternating",
+    "uniform", "interrupted", "uninterrupted", "continuous", "closed-canopy", "mixed-height",
+}
+TOKEN_SYNONYMS = {
+    "woods": "forest", "woodland": "forest", "wooded": "forest", "tree": "forest",
+    "trees": "forest", "treetops": "forest", "crowns": "forest", "crown": "forest",
+    "canopy": "forest", "stand": "forest", "stands": "forest", "understory": "forest",
+    "coniferous": "conifer", "needleleaf": "conifer", "evergreen": "conifer",
+    "broadleaf-dominated": "broadleaf", "deciduous": "broadleaf",
+    "river": "stream", "creek": "stream", "watercourse": "stream", "channel": "stream",
+    "channels": "stream", "streams": "stream", "meandering": "stream",
+    "ponds": "pond", "lakes": "pond", "lakeshore": "pond", "shoreline": "pond",
+    "wetlands": "wetland", "marsh": "wetland", "marshy": "wetland",
+    "field": "agriculture", "fields": "agriculture", "cropland": "agriculture",
+    "crop": "agriculture", "crops": "agriculture", "agricultural": "agriculture",
+    "cultivated": "agriculture", "plowed": "agriculture", "harvested": "agriculture",
+    "irrigated": "agriculture", "pasture": "grass", "prairie": "grass", "meadow": "grass",
+    "grassland": "grass", "grassy": "grass", "grasses": "grass",
+    "shrubs": "shrub", "shrubland": "shrub", "bushes": "shrub",
+    "sandy": "sand", "soil": "bare", "earth": "bare", "barren": "bare",
+    "road": "road", "track": "road", "path": "road", "trail": "road",
 }
 
 
@@ -238,49 +252,107 @@ def safe_float(value: Any) -> float | None:
         return None
 
 
+def score_hypothesis_entry(entry: Dict[str, Any]) -> float:
+    for key in ("auroc", "correct_delta", "diff", "score1", "score2", "t_stat"):
+        val = safe_float(entry.get(key))
+        if val is not None and not math.isnan(val):
+            return val
+    return math.nan
+
+
+def _canonicalize_token(token: str) -> str:
+    token = TOKEN_SYNONYMS.get(token, token)
+    if token.endswith("ies") and len(token) > 4:
+        token = token[:-3] + "y"
+    elif token.endswith("s") and len(token) > 3 and not token.endswith("ss"):
+        token = token[:-1]
+    token = TOKEN_SYNONYMS.get(token, token)
+    return token
+
+
 def normalize_difference_text(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"\([^)]*\)", " ", text)
+    text = str(text).lower()
+    text = re.sub(r"[()]", " ", text)
+    text = text.replace("/", " ").replace("-", " ")
     text = re.sub(r"[^a-z0-9\s]", " ", text)
-    tokens = [tok for tok in text.split() if tok not in NEAR_DUPLICATE_STOPWORDS]
+    tokens = []
+    for raw_token in text.split():
+        token = _canonicalize_token(raw_token)
+        if len(token) <= 1 or token in GENERIC_DIFFERENCE_TOKENS:
+            continue
+        tokens.append(token)
     return " ".join(tokens)
 
 
-def token_jaccard(a: str, b: str) -> float:
-    a_tokens = set(a.split())
-    b_tokens = set(b.split())
-    if not a_tokens or not b_tokens:
-        return 0.0
-    return len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
+def semantic_signature(text: str) -> tuple[str, ...]:
+    normalized = normalize_difference_text(text)
+    if not normalized:
+        return tuple()
+    tokens = []
+    seen = set()
+    for token in normalized.split():
+        if token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tuple(sorted(tokens))
 
 
-def string_similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
-
-
-def is_near_duplicate(
-    candidate: str,
-    existing_values: Sequence[str],
-    *,
-    jaccard_threshold: float = NEAR_DUPLICATE_JACCARD_THRESHOLD,
-    seq_threshold: float = NEAR_DUPLICATE_SEQ_THRESHOLD,
-) -> bool:
-    normalized_candidate = normalize_difference_text(candidate)
-    if not normalized_candidate:
+def is_near_duplicate(candidate: str, kept: Sequence[str]) -> bool:
+    candidate_norm = normalize_difference_text(candidate)
+    candidate_sig = set(semantic_signature(candidate))
+    if not candidate_norm:
         return True
 
-    for existing in existing_values:
-        normalized_existing = normalize_difference_text(existing)
-        if not normalized_existing:
-            continue
-        if normalized_candidate == normalized_existing:
+    for existing in kept:
+        existing_norm = normalize_difference_text(existing)
+        existing_sig = set(semantic_signature(existing))
+
+        if candidate_norm == existing_norm:
             return True
-        if token_jaccard(normalized_candidate, normalized_existing) >= jaccard_threshold:
-            return True
-        if string_similarity(normalized_candidate, normalized_existing) >= seq_threshold:
+
+        if candidate_sig and existing_sig:
+            overlap = len(candidate_sig & existing_sig)
+            union = len(candidate_sig | existing_sig)
+            jaccard = overlap / union if union else 0.0
+
+            if candidate_sig == existing_sig:
+                return True
+            if overlap >= 2 and jaccard >= 0.67:
+                return True
+            if min(len(candidate_sig), len(existing_sig)) == 1 and jaccard == 1.0:
+                return True
+
+        seq_ratio = SequenceMatcher(None, candidate_norm, existing_norm).ratio()
+        if seq_ratio >= 0.86:
             return True
 
     return False
+
+
+def dedupe_ranked_rows(
+    rows: Sequence[Dict[str, str | float]], *, max_rows: int | None = None
+) -> List[Dict[str, str | float]]:
+    kept: List[Dict[str, str | float]] = []
+    kept_text: List[str] = []
+
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            -safe_float(row.get("auroc")) if safe_float(row.get("auroc")) is not None else float("inf")
+        ),
+    )
+
+    for row in sorted_rows:
+        difference = str(row.get("difference", "")).strip()
+        if not difference or is_near_duplicate(difference, kept_text):
+            continue
+        kept.append(row)
+        kept_text.append(difference)
+        if max_rows is not None and len(kept) >= max_rows:
+            break
+
+    return kept
 
 
 def build_visdiff_rows(
@@ -300,63 +372,43 @@ def build_visdiff_rows(
         difference = clean_hypothesis_text(entry.get("hypothesis"))
         if not difference:
             continue
-        score = None
         scores = {}
         score_keys = ("auroc", "correct_delta", "diff", "score1", "score2", "t_stat")
         for key in score_keys:
-            val = safe_float(entry.get(key))
-            if score is not None and val is not None:
-                score = val
-            scores[key] = val
-        if score is None:
-            score = math.nan
+            scores[key] = safe_float(entry.get(key))
         rows.append(
             {
                 "taxon_id": taxon_id,
                 "species": species_name,
                 "difference": difference,
-                "score": score,
+                "score": score_hypothesis_entry(entry),
                 **scores,
             }
         )
-    return rows
+    return dedupe_ranked_rows(rows, max_rows=MAX_HYPOTHESES_PER_RUN)
 
 
 def aggregate_visdiff_rows(rows: Sequence[Dict[str, str | float]]) -> pd.DataFrame:
     minimum_columns = ["taxon_id", "species", "difference", "auroc"]
     if not rows:
         return pd.DataFrame(columns=minimum_columns)
-
     df = pd.DataFrame(rows)
     missing = [col for col in minimum_columns if col not in df.columns]
     if missing:
         raise KeyError(f"Missing columns in VisDiff rows: {missing}")
-
     df["auroc"] = pd.to_numeric(df["auroc"], errors="coerce")
-    df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False]).reset_index(
-        drop=True
-    )
+    df = df.sort_values(["taxon_id", "auroc"], ascending=[True, False]).reset_index(drop=True)
 
-    deduped_rows: List[Dict[str, str | float]] = []
+    deduped_rows: List[Dict[str, Any]] = []
     for _, group in df.groupby("taxon_id", sort=False):
-        kept_differences: List[str] = []
-        for _, row in group.iterrows():
-            difference = str(row["difference"]).strip()
-            if not difference:
-                continue
-            if is_near_duplicate(difference, kept_differences):
-                continue
-            kept_differences.append(difference)
-            deduped_rows.append(cast(Dict[str, str | float], row.to_dict()))
+        group_rows = cast(List[Dict[str, Any]], group.to_dict(orient="records"))
+        deduped_rows.extend(
+            dedupe_ranked_rows(group_rows, max_rows=MAX_HYPOTHESES_PER_SPECIES)
+        )
 
-    deduped_df = pd.DataFrame(deduped_rows)
-    if deduped_df.empty:
-        return pd.DataFrame(columns=df.columns)
-
-    deduped_df = deduped_df.sort_values(
-        ["taxon_id", "auroc"], ascending=[True, False]
-    ).reset_index(drop=True)
-    return deduped_df
+    out = pd.DataFrame(deduped_rows)
+    out = out.sort_values(["taxon_id", "auroc"], ascending=[True, False]).reset_index(drop=True)
+    return out
 
 
 def load_existing_visdiff_rows(
@@ -420,9 +472,9 @@ def run_pyvisdiff(
 
     {text}
 
-    List 10 distinct concepts more likely in Group A than Group B.
+    List 10 concepts more likely in Group A than Group B.
 
-    Each concept must be a short noun phrase describing one visible habitat feature. Use only generic observable descriptors. Do not mention modality, image quality, proper nouns, place names, geographic labels, biome labels, or inferred location. Rewrite any named place or regional term into a purely visual habitat phrase. Avoid restating the same concept with minor wording changes. Each bullet must describe a materially different visible habitat feature.
+    Each concept must be a short noun phrase describing one visible habitat feature. The 10 bullets must be materially different from one another. Do not restate the same idea with minor wording changes, especially for repeated forest, water, agriculture, or open-ground patterns. Prefer one specific phrase over several paraphrases of the same feature. Use only generic observable descriptors. Do not mention modality, image quality, proper nouns, place names, geographic labels, biome labels, or inferred location. Rewrite any named place or regional term into a purely visual habitat phrase.
 
     Answer using bullet points starting with "*".
     """

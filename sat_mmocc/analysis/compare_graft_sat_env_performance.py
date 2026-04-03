@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import pickle
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -44,7 +45,7 @@ from sat_mmocc.utils import (
 
 DEFAULT_MODALITIES = ("covariates", "sat")
 DEFAULT_OUTPUT_PREFIX = (
-    Path(__file__).resolve().parent / "outputs" / "compare_graft_sat_env_performance"
+    Path(__file__).resolve().parent / "outputs" / "p4" / "p4"
 )
 
 PRIMARY_METRICS = [
@@ -61,7 +62,27 @@ PRIMARY_METRICS = [
     "lr_mcc_test",
 ]
 
-VALID_IMAGERY_SOURCES = frozenset({"sentinel", "naip"})
+VALID_IMAGERY_SOURCES = frozenset({"sentinel", "naip", "sentinel_v_graft", "naip_v_graft"})
+
+IMAGERY_SOURCE_VISDIFF_FILES: dict[str, Path] = {
+    "sentinel_v_graft": cache_path / "visdiff_sentinel_v_graft_descriptions_p4.csv",
+    "naip_v_graft": cache_path / "visdiff_naip_v_graft_descriptions_p4.csv",
+}
+
+
+def _get_descriptor_output_tag(imagery_source: str) -> str:
+    """Return the compact tag embedded in the VisDiff CSV filename (e.g. '_prompt2')."""
+    path = IMAGERY_SOURCE_VISDIFF_FILES.get(imagery_source)
+    if path is None:
+        return ""
+    match = re.search(r"_(p\d+|prompt\d+)$", path.stem, flags=re.IGNORECASE)
+    if match is not None:
+        return f"_{match.group(1).lower()}"
+    sanitized = re.sub(r"[^a-zA-Z0-9]+", "_", path.stem).strip("_").lower()
+    prefix = f"visdiff_{imagery_source}".lower()
+    if sanitized.startswith(prefix):
+        sanitized = sanitized[len(prefix):].strip("_")
+    return f"_{sanitized}" if sanitized else ""
 
 
 @dataclass(frozen=True)
@@ -148,7 +169,9 @@ def get_graft_refit_sat_backbone(
             f"Unknown descriptor source '{descriptor_source}'. "
             "Choose from: ['expert', 'visdiff']"
         )
-    return f"graft_visdiff_{normalize_imagery_source(imagery_source)}"
+    norm = normalize_imagery_source(imagery_source)
+    return f"graft_visdiff_{norm}{_get_descriptor_output_tag(norm)}"
+
 
 
 def build_fit_results_path(
@@ -191,8 +214,8 @@ def build_specs(modalities: Sequence[str]) -> list[ComparisonSpec]:
             display_name="Refit GRAFT Sentinel",
             modalities=modalities,
             image_backbone=default_image_backbone,
-            sat_backbone=get_graft_refit_sat_backbone("visdiff", "sentinel"),
-            imagery_source="sentinel",
+            sat_backbone=get_graft_refit_sat_backbone("visdiff", "sentinel_v_graft"),
+            imagery_source="sentinel_v_graft",
             descriptor_source="visdiff",
         ),
         ComparisonSpec(
@@ -200,8 +223,8 @@ def build_specs(modalities: Sequence[str]) -> list[ComparisonSpec]:
             display_name="Refit GRAFT NAIP",
             modalities=modalities,
             image_backbone=default_image_backbone,
-            sat_backbone=get_graft_refit_sat_backbone("visdiff", "naip"),
-            imagery_source="naip",
+            sat_backbone=get_graft_refit_sat_backbone("visdiff", "naip_v_graft"),
+            imagery_source="naip_v_graft",
             descriptor_source="visdiff",
         ),
     ]

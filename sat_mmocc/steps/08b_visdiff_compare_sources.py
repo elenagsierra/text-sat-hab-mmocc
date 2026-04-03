@@ -9,36 +9,10 @@
 # [tool.uv.sources]
 # mmocc = { path = "../.." }
 # ///
-"""Compare NAIP vs Sentinel imagery side-by-side with per-source VisDiff outputs.
-
-For each species, selects sites that rank highly under both sources, then renders:
-
-  Left panel (image grid):
-    Group A (Present) — NAIP row
-    Group A (Present) — Sentinel row   } same locations
-    Group B (Absent)  — NAIP row
-    Group B (Absent)  — Sentinel row   } same locations
-
-  Right panel (two columns):
-    NAIP VisDiff hypotheses | Sentinel VisDiff hypotheses
-
-Usage examples
---------------
-# All species, default CSVs and backbones
-./sat_mmocc/steps/08b_visdiff_compare_sources.py
-
-# Specific CSV paths
-./sat_mmocc/steps/08b_visdiff_compare_sources.py \\
-    --naip_csv=/path/to/visdiff_naip.csv \\
-    --sentinel_csv=/path/to/visdiff_sentinel.csv
-
-# Single species, PDF output
-./sat_mmocc/steps/08b_visdiff_compare_sources.py \\
-    --species_ids=00804e75-09ef-44e5-8984-85e365377d47 \\
-    --fmt=pdf
-"""
+"""Compare NAIP vs Sentinel imagery with one readable row per source."""
 
 import logging
+import textwrap
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -86,70 +60,82 @@ DEFAULT_VISDIFF_CSVS = {
 MODALITIES = ["image", "sat", "covariates"]
 TOP_K = 50
 UNIQUE_WEIGHT = 2.0
-N_IMAGES = 5
+N_IMAGES = 10
 N_HYPOTHESES = 12
 THUMB_SIZE = (192, 192)
+DESCRIPTION_WRAP_WIDTH = 44
+DESCRIPTION_FONT_SIZE = 11
+IMAGE_SUBROWS = 2
+IMAGES_PER_SUBROW = 5
 
 
 # ── Spatial helpers ────────────────────────────────────────────────────────────
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in km between two (lat, lon) points."""
-    R = 6371.0
+    radius_km = 6371.0
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi = np.radians(lat2 - lat1)
     dlam = np.radians(lon2 - lon1)
     a = np.sin(dphi / 2) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlam / 2) ** 2
-    return 2 * R * np.arcsin(np.sqrt(a))
+    return 2 * radius_km * np.arcsin(np.sqrt(a))
 
 
-def _select_shared_locations(
-    primary_df: pd.DataFrame,
-    secondary_df: pd.DataFrame,
+def _seed_coords(df: pd.DataFrame, seed_locs: Sequence[str] | None) -> List[Tuple[float, float]]:
+    if not seed_locs or "Latitude" not in df.columns or "Longitude" not in df.columns:
+        return []
+    seed_set = {str(loc) for loc in seed_locs}
+    coords: List[Tuple[float, float]] = []
+    for _, row in df.iterrows():
+        loc = str(row.get("loc_id", "")).strip()
+        if loc not in seed_set:
+            continue
+        try:
+            coords.append((float(row["Latitude"]), float(row["Longitude"])))
+        except (TypeError, ValueError):
+            continue
+    return coords
+
+
+def _select_unique_locations(
+    df: pd.DataFrame,
     n: int,
     min_dist_km: float = 50.0,
+    required_locs: set[str] | None = None,
+    exclude_locs: set[str] | None = None,
+    seed_locs: Sequence[str] | None = None,
 ) -> List[str]:
-    """Return up to *n* loc_ids present in both DataFrames, spatially spread.
-
-    Iterates *primary_df* in rank order and accepts a location only when:
-      1. The loc_id also appears in *secondary_df*.
-      2. No already-selected site is within *min_dist_km* km.
-
-    Parameters
-    ----------
-    primary_df:     Ranked DataFrame for the reference source (e.g. NAIP).
-    secondary_df:   Ranked DataFrame for the comparison source (e.g. Sentinel).
-    n:              Maximum number of locations to return.
-    min_dist_km:    Minimum inter-site distance (km).  Set to 0 to disable.
-    """
-    secondary_locs = set(secondary_df["loc_id"].dropna().astype(str))
-    has_coords = "Latitude" in primary_df.columns and "Longitude" in primary_df.columns
-
-    seen_locs: set = set()
-    selected_coords: List[Tuple[float, float]] = []
+    """Return up to *n* unique loc_ids in rank order, optionally filtered."""
+    has_coords = "Latitude" in df.columns and "Longitude" in df.columns
+    excluded = exclude_locs or set()
+    selected_coords = _seed_coords(df, seed_locs)
     loc_ids: List[str] = []
 
-    for _, row in primary_df.iterrows():
-        loc = str(row.get("loc_id", ""))
-        if not loc or loc in seen_locs:
+    for _, row in df.iterrows():
+        loc = str(row.get("loc_id", "")).strip()
+        if not loc or loc in excluded or loc in loc_ids:
             continue
-        if loc not in secondary_locs:
-            continue  # location not available in the other source
+        if required_locs is not None and loc not in required_locs:
+            continue
 
         if has_coords and min_dist_km > 0 and selected_coords:
             try:
                 lat, lon = float(row["Latitude"]), float(row["Longitude"])
                 too_close = any(
-                    _haversine_km(lat, lon, slat, slon) < min_dist_km
-                    for slat, slon in selected_coords
+                    _haversine_km(lat, lon, sel_lat, sel_lon) < min_dist_km
+                    for sel_lat, sel_lon in selected_coords
                 )
                 if too_close:
                     continue
                 selected_coords.append((lat, lon))
             except (TypeError, ValueError):
-                pass  # missing coords — include anyway
+                pass
+        elif has_coords:
+            try:
+                selected_coords.append((float(row["Latitude"]), float(row["Longitude"])))
+            except (TypeError, ValueError):
+                pass
 
-        seen_locs.add(loc)
         loc_ids.append(loc)
         if len(loc_ids) == n:
             break
@@ -161,84 +147,204 @@ def _select_shared_locations(
 
 def _load_thumb(path: str, size: Tuple[int, int] = THUMB_SIZE) -> Optional[np.ndarray]:
     try:
-        img = Image.open(path).convert("RGB").resize(size, Image.LANCZOS)
-        return np.asarray(img)
+        image = Image.open(path).convert("RGB").resize(size, Image.LANCZOS)
+        return np.asarray(image)
     except Exception:
         return None
 
 
-def _plot_image_row(
-    axes_row: list,
-    paths: List[str],
-    color: str,
-    label: str,
-    label_side: str = "left",
-) -> None:
-    """Render one row of thumbnail images onto *axes_row*."""
-    for col_idx, ax in enumerate(axes_row):
-        if col_idx < len(paths):
-            arr = _load_thumb(paths[col_idx])
-            if arr is not None:
-                ax.imshow(arr)
-                ax.set_title(Path(paths[col_idx]).stem[:22], fontsize=5.5, color="dimgray")
-            else:
-                ax.text(0.5, 0.5, "missing", ha="center", va="center", fontsize=8)
-        else:
-            ax.set_visible(False)
-        ax.axis("off")
-        for spine in ax.spines.values():
-            spine.set_edgecolor(color)
-            spine.set_linewidth(2)
-            spine.set_visible(True)
-
-    if axes_row and label_side == "left":
-        axes_row[0].set_ylabel(
-            label, fontsize=8, color=color, fontweight="bold",
-            rotation=90, labelpad=4,
-        )
+def _plot_thumb(ax: plt.Axes, path: str, color: str) -> None:
+    thumb = _load_thumb(path)
+    if thumb is not None:
+        ax.imshow(thumb)
+    else:
+        ax.text(0.5, 0.5, "missing", ha="center", va="center", fontsize=8)
+    ax.axis("off")
+    ax.set_aspect("equal")
+    for spine in ax.spines.values():
+        spine.set_edgecolor(color)
+        spine.set_linewidth(2)
+        spine.set_visible(True)
 
 
-def _plot_hypotheses(
-    ax: plt.Axes,
+def _plot_row_label(ax: plt.Axes, label: str, color: str) -> None:
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        label,
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+        color=color,
+        rotation=90,
+        transform=ax.transAxes,
+    )
+
+
+def _plot_group_label(ax: plt.Axes, label: str, color: str) -> None:
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        label,
+        ha="center",
+        va="center",
+        fontsize=10,
+        fontweight="bold",
+        color=color,
+        transform=ax.transAxes,
+    )
+
+
+def _plot_column_header(ax: plt.Axes, label: str) -> None:
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        label,
+        ha="center",
+        va="center",
+        fontsize=11,
+        fontweight="bold",
+        transform=ax.transAxes,
+    )
+
+
+def _get_visdiff_panel_text(
     visdiff_df: pd.DataFrame,
     taxon_id: str,
     n: int,
-    title: str = "VisDiff hypotheses",
-) -> None:
-    """Horizontal bar chart of top VisDiff hypotheses for *taxon_id*."""
-    df = (
-        visdiff_df[visdiff_df["taxon_id"] == str(taxon_id)]
-        .sort_values("auroc", ascending=False)
-        .head(n)
-    )
-    if df.empty:
-        ax.text(0.5, 0.5, "No hypotheses", ha="center", va="center", transform=ax.transAxes)
-        ax.axis("off")
-        return
+    wrap_width: int = DESCRIPTION_WRAP_WIDTH,
+) -> tuple[str, int]:
+    subset = visdiff_df[visdiff_df["taxon_id"] == str(taxon_id)].copy()
+    if subset.empty:
+        body = "No VisDiff descriptions found."
+        return body, 1
 
-    auroc_vals = df["auroc"].values[::-1]
-    labels = [
-        (lbl if len(lbl) <= 55 else lbl[:54] + "…")
-        for lbl in df["difference"].values[::-1]
+    subset["difference"] = subset["difference"].fillna("").astype(str).str.strip()
+    subset = subset[subset["difference"] != ""]
+    subset["auroc"] = pd.to_numeric(subset["auroc"], errors="coerce")
+    subset = subset.sort_values("auroc", ascending=False)
+    subset = subset.drop_duplicates(subset="difference").head(n)
+
+    if subset.empty:
+        body = "No VisDiff descriptions found."
+        return body, 1
+
+    blocks = [
+        textwrap.fill(
+            f"{idx}. {row.difference}",
+            width=wrap_width,
+            subsequent_indent="    ",
+        )
+        for idx, row in enumerate(subset.itertuples(index=False), start=1)
+    ]
+    body = "\n\n".join(blocks)
+    return body, body.count("\n") + 1
+
+
+def _estimate_row_height(description_line_count: int) -> float:
+    return max(3.0, 1.8 + 0.20 * description_line_count)
+
+
+def _split_paths_into_subrows(
+    paths: List[str],
+    images_per_subrow: int = IMAGES_PER_SUBROW,
+) -> List[List[str]]:
+    return [
+        paths[start : start + images_per_subrow]
+        for start in range(0, len(paths), images_per_subrow)
     ]
 
-    cmap = plt.cm.RdYlGn
-    colors = [cmap(v) for v in np.clip((auroc_vals - 0.4) / 0.4, 0, 1)]
-    bars = ax.barh(range(len(labels)), auroc_vals, color=colors, edgecolor="white")
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels(labels, fontsize=7.5)
-    ax.set_xlabel("AUROC", fontsize=8)
-    ax.axvline(0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.set_xlim(
-        left=max(0.0, float(auroc_vals.min()) - 0.05),
-        right=min(1.0, float(auroc_vals.max()) + 0.05),
+
+def _plot_description_panel(
+    ax: plt.Axes,
+    title: str,
+    body: str,
+    font_size: float = DESCRIPTION_FONT_SIZE,
+) -> None:
+    ax.axis("off")
+    ax.text(
+        0.0,
+        1.0,
+        title,
+        ha="left",
+        va="top",
+        fontsize=font_size + 1,
+        fontweight="bold",
+        transform=ax.transAxes,
     )
-    ax.set_title(title, fontsize=9, fontweight="bold")
-    for bar, val in zip(bars, auroc_vals):
-        ax.text(
-            bar.get_width() + 0.002, bar.get_y() + bar.get_height() / 2,
-            f"{val:.3f}", va="center", fontsize=7,
+    ax.text(
+        0.0,
+        0.92,
+        body,
+        ha="left",
+        va="top",
+        fontsize=font_size,
+        linespacing=1.35,
+        transform=ax.transAxes,
+    )
+
+
+def _paths_for_source(
+    loc_ids: List[str],
+    df: pd.DataFrame,
+    fallback_lookup: dict[str, str],
+) -> List[str]:
+    loc_to_path: dict[str, str] = {}
+    if not df.empty and "image_path" in df.columns:
+        for _, row in df.iterrows():
+            loc = str(row.get("loc_id", "")).strip()
+            if loc and loc not in loc_to_path:
+                loc_to_path[loc] = str(row.get("image_path", ""))
+    return [loc_to_path.get(loc, fallback_lookup.get(loc, "")) for loc in loc_ids]
+
+
+def _build_satellite_group_paths(
+    primary_df: pd.DataFrame,
+    secondary_df: pd.DataFrame,
+    primary_lookup: dict[str, str],
+    secondary_lookup: dict[str, str],
+    n: int,
+    min_dist_km: float,
+) -> tuple[List[str], List[str]]:
+    shared_loc_ids = _select_unique_locations(
+        primary_df,
+        n,
+        min_dist_km=min_dist_km,
+        required_locs=set(secondary_df["loc_id"].dropna().astype(str)),
+    )
+
+    primary_locs = list(shared_loc_ids)
+    secondary_locs = list(shared_loc_ids)
+
+    if len(primary_locs) < n:
+        primary_locs.extend(
+            _select_unique_locations(
+                primary_df,
+                n - len(primary_locs),
+                min_dist_km=min_dist_km,
+                exclude_locs=set(primary_locs),
+                seed_locs=primary_locs,
+            )
         )
+    if len(secondary_locs) < n:
+        secondary_locs.extend(
+            _select_unique_locations(
+                secondary_df,
+                n - len(secondary_locs),
+                min_dist_km=min_dist_km,
+                exclude_locs=set(secondary_locs),
+                seed_locs=secondary_locs,
+            )
+        )
+
+    return (
+        _paths_for_source(primary_locs, primary_df, primary_lookup),
+        _paths_for_source(secondary_locs, secondary_df, secondary_lookup),
+    )
 
 
 # ── Per-source ranked groups ───────────────────────────────────────────────────
@@ -267,6 +373,7 @@ def _get_ranked_groups(
     site_scores, _ = compute_site_scores(tid, res_mod, res_img, res_sat, fit_results)
     site_scores = site_scores.join(image_lookup, on="loc_id", how="left")
     site_scores["image_exists"] = site_scores["image_exists"].fillna(False).astype(bool)
+    site_scores["image_path"] = site_scores["image_path"].fillna("").astype(str)
 
     pos_df, neg_df = rank_image_groups(
         site_scores,
@@ -299,31 +406,43 @@ def generate_comparison_figure(
     n_images: int = N_IMAGES,
     n_hypotheses: int = N_HYPOTHESES,
     mode: str = "standard",
-    min_dist_km: float = 50.0,
+    min_dist_km: float = 0.0,
 ) -> Optional[plt.Figure]:
     """Return a side-by-side NAIP/Sentinel comparison figure, or None on failure."""
     tid = str(taxon_id)
     naip_lookup = load_imagery_lookup(naip_imagery_source, png_dir=naip_png_dir)
     sentinel_lookup = load_imagery_lookup(
-        sentinel_imagery_source, png_dir=sentinel_png_dir
+        sentinel_imagery_source,
+        png_dir=sentinel_png_dir,
     )
     naip_label = get_imagery_source_label(naip_imagery_source)
     sentinel_label = get_imagery_source_label(sentinel_imagery_source)
 
     naip_result = _get_ranked_groups(
-        tid, naip_lookup, modalities, image_backbone, naip_sat_backbone,
-        top_k, unique_weight, mode,
+        tid,
+        naip_lookup,
+        modalities,
+        image_backbone,
+        naip_sat_backbone,
+        top_k,
+        unique_weight,
+        mode,
     )
     sentinel_result = _get_ranked_groups(
-        tid, sentinel_lookup, modalities, image_backbone, sentinel_sat_backbone,
-        top_k, unique_weight, mode,
+        tid,
+        sentinel_lookup,
+        modalities,
+        image_backbone,
+        sentinel_sat_backbone,
+        top_k,
+        unique_weight,
+        mode,
     )
 
     if naip_result is None and sentinel_result is None:
         LOGGER.warning("Skipping %s — no fit results for either source.", tid)
         return None
 
-    # Retrieve display name from whichever source succeeded
     display_name = tid
     for sat_backbone in [naip_sat_backbone, sentinel_sat_backbone]:
         try:
@@ -337,97 +456,116 @@ def generate_comparison_figure(
         except Exception:
             continue
 
-    # ── Select shared locations per group ──────────────────────────────────────
-    def _paths_for_source(
-        loc_ids: List[str],
-        df: pd.DataFrame,
-        fallback_lookup: dict[str, str],
-    ) -> List[str]:
-        """Map selected loc_ids → image paths (in loc_id order) from a ranked df."""
-        loc_to_path: dict = {}
-        for _, row in df.iterrows():
-            loc = str(row.get("loc_id", ""))
-            if loc not in loc_to_path:
-                loc_to_path[loc] = str(row.get("image_path", ""))
-        return [loc_to_path.get(lid, fallback_lookup.get(lid, "")) for lid in loc_ids]
-
-    # Fallback to empty df when one source is missing
-    empty_df = pd.DataFrame(columns=["loc_id", "image_path", "image_exists", "Latitude", "Longitude"])
-
+    empty_df = pd.DataFrame(
+        columns=["loc_id", "image_path", "image_exists", "Latitude", "Longitude"]
+    )
     naip_pos_df, naip_neg_df = naip_result if naip_result else (empty_df, empty_df)
     sent_pos_df, sent_neg_df = sentinel_result if sentinel_result else (empty_df, empty_df)
 
-    # Primary DFs for location ordering: prefer whichever source gave results
-    primary_pos = naip_pos_df if naip_result else sent_pos_df
-    primary_neg = naip_neg_df if naip_result else sent_neg_df
-    secondary_pos = sent_pos_df if naip_result else empty_df
-    secondary_neg = sent_neg_df if naip_result else empty_df
-    primary_label = naip_label if naip_result else sentinel_label
-
-    shared_pos_locs = _select_shared_locations(primary_pos, secondary_pos, n_images, min_dist_km)
-    shared_neg_locs = _select_shared_locations(primary_neg, secondary_neg, n_images, min_dist_km)
-
-    # Fall back to best-available locations when no overlap
-    if not shared_pos_locs:
-        LOGGER.warning("%s: no shared Group A locations; falling back to %s.", tid, primary_label)
-        shared_pos_locs = (
-            primary_pos["loc_id"].dropna().astype(str).unique()[:n_images].tolist()
-        )
-    if not shared_neg_locs:
-        LOGGER.warning("%s: no shared Group B locations; falling back to %s.", tid, primary_label)
-        shared_neg_locs = (
-            primary_neg["loc_id"].dropna().astype(str).unique()[:n_images].tolist()
-        )
-
     naip_path_map = lookup_to_path_map(naip_lookup)
     sentinel_path_map = lookup_to_path_map(sentinel_lookup)
-    naip_pos_paths = _paths_for_source(shared_pos_locs, naip_pos_df, naip_path_map)
-    sent_pos_paths = _paths_for_source(shared_pos_locs, sent_pos_df, sentinel_path_map)
-    naip_neg_paths = _paths_for_source(shared_neg_locs, naip_neg_df, naip_path_map)
-    sent_neg_paths = _paths_for_source(shared_neg_locs, sent_neg_df, sentinel_path_map)
+    naip_pos_paths, sent_pos_paths = _build_satellite_group_paths(
+        naip_pos_df,
+        sent_pos_df,
+        naip_path_map,
+        sentinel_path_map,
+        n_images,
+        min_dist_km,
+    )
+    naip_neg_paths, sent_neg_paths = _build_satellite_group_paths(
+        naip_neg_df,
+        sent_neg_df,
+        naip_path_map,
+        sentinel_path_map,
+        n_images,
+        min_dist_km,
+    )
 
-    # ── Figure layout ──────────────────────────────────────────────────────────
-    #  [ image grid (4 rows × n_images cols) | hypothesis A | hypothesis B ]
-    img_width = n_images * 2.2
-    hyp_width = 9.0
-    fig_h = max(8, 0.45 * n_hypotheses + 5)
+    naip_body, naip_lines = _get_visdiff_panel_text(naip_visdiff_df, tid, n_hypotheses)
+    sent_body, sent_lines = _get_visdiff_panel_text(
+        sentinel_visdiff_df,
+        tid,
+        n_hypotheses,
+    )
+    naip_pos_rows = _split_paths_into_subrows(naip_pos_paths)
+    naip_neg_rows = _split_paths_into_subrows(naip_neg_paths)
+    sent_pos_rows = _split_paths_into_subrows(sent_pos_paths)
+    sent_neg_rows = _split_paths_into_subrows(sent_neg_paths)
+    source_heights = [
+        _estimate_row_height(naip_lines + 2),
+        _estimate_row_height(sent_lines + 2),
+    ]
 
-    fig = plt.figure(figsize=(img_width + 2 * hyp_width + 0.8, fig_h))
+    fig = plt.figure(figsize=(20, sum(source_heights) + 1.8))
     fig.suptitle(
         f"{display_name}  (taxon {tid})",
-        fontsize=13, fontweight="bold", y=1.01,
+        fontsize=14,
+        fontweight="bold",
     )
 
+    image_columns = min(IMAGES_PER_SUBROW, max(1, n_images))
+    width_ratios = [1.1, 1.7] + [1.0] * image_columns + [7.0]
     outer = gridspec.GridSpec(
-        1, 3, figure=fig,
-        width_ratios=[img_width, hyp_width, hyp_width],
-        wspace=0.35,
+        9,
+        image_columns + 3,
+        figure=fig,
+        width_ratios=width_ratios,
+        height_ratios=[
+            0.45,
+            source_heights[0] / 4,
+            source_heights[0] / 4,
+            source_heights[0] / 4,
+            source_heights[0] / 4,
+            source_heights[1] / 4,
+            source_heights[1] / 4,
+            source_heights[1] / 4,
+            source_heights[1] / 4,
+        ],
+        wspace=0.04,
+        hspace=0.12,
     )
 
-    # Left: 4-row image grid (pos-NAIP, pos-Sentinel, neg-NAIP, neg-Sentinel)
-    left_gs = gridspec.GridSpecFromSubplotSpec(
-        4, n_images, subplot_spec=outer[0], hspace=0.12, wspace=0.04,
-    )
+    _plot_column_header(fig.add_subplot(outer[0, 0]), "Source")
+    _plot_column_header(fig.add_subplot(outer[0, 1]), "Group")
+    _plot_column_header(fig.add_subplot(outer[0, 2 : 2 + image_columns]), "Example images")
+    _plot_column_header(fig.add_subplot(outer[0, -1]), "VisDiff descriptions")
 
     row_specs = [
-        (f"Group A (present) — {naip_label}",     "#2196F3", naip_pos_paths),
-        (f"Group A (present) — {sentinel_label}", "#64B5F6", sent_pos_paths),
-        (f"Group B (absent)  — {naip_label}",     "#F44336", naip_neg_paths),
-        (f"Group B (absent)  — {sentinel_label}", "#EF9A9A", sent_neg_paths),
+        (1, naip_label, "#1565C0", naip_pos_rows, naip_neg_rows, naip_body),
+        (5, sentinel_label, "#00796B", sent_pos_rows, sent_neg_rows, sent_body),
     ]
-    for row_idx, (label, color, paths) in enumerate(row_specs):
-        axes_row = [fig.add_subplot(left_gs[row_idx, c]) for c in range(n_images)]
-        _plot_image_row(axes_row, paths, color, label)
+    for row_idx, label, row_color, pos_rows, neg_rows, body in row_specs:
+        _plot_row_label(fig.add_subplot(outer[row_idx : row_idx + 4, 0]), label, row_color)
+        _plot_group_label(
+            fig.add_subplot(outer[row_idx : row_idx + 2, 1]),
+            "Likely\noccupied",
+            "#2196F3",
+        )
+        _plot_group_label(
+            fig.add_subplot(outer[row_idx + 2 : row_idx + 4, 1]),
+            "Likely\nunoccupied",
+            "#F44336",
+        )
+        for subrow_idx, row_paths in enumerate(pos_rows[:IMAGE_SUBROWS]):
+            for col_idx, path in enumerate(row_paths[:image_columns]):
+                _plot_thumb(
+                    fig.add_subplot(outer[row_idx + subrow_idx, 2 + col_idx]),
+                    path,
+                    "#2196F3",
+                )
+        for subrow_idx, row_paths in enumerate(neg_rows[:IMAGE_SUBROWS]):
+            for col_idx, path in enumerate(row_paths[:image_columns]):
+                _plot_thumb(
+                    fig.add_subplot(outer[row_idx + 2 + subrow_idx, 2 + col_idx]),
+                    path,
+                    "#F44336",
+                )
+        _plot_description_panel(
+            fig.add_subplot(outer[row_idx : row_idx + 4, -1]),
+            f"{label} top {n_hypotheses} VisDiff descriptions",
+            body,
+        )
 
-    # Middle: NAIP hypotheses
-    ax_naip = fig.add_subplot(outer[1])
-    _plot_hypotheses(ax_naip, naip_visdiff_df, tid, n_hypotheses, title=f"{naip_label} — VisDiff hypotheses")
-
-    # Right: Sentinel hypotheses
-    ax_sent = fig.add_subplot(outer[2])
-    _plot_hypotheses(ax_sent, sentinel_visdiff_df, tid, n_hypotheses, title=f"{sentinel_label} — VisDiff hypotheses")
-
-    plt.tight_layout()
     return fig
 
 
@@ -452,43 +590,26 @@ def main(
     n_images: int = N_IMAGES,
     n_hypotheses: int = N_HYPOTHESES,
     mode: str = "standard",
-    min_dist_km: float = 50.0,
+    min_dist_km: float = 0.0,
     dpi: int = 150,
     overwrite: bool = False,
 ) -> None:
-    """Render per-species NAIP vs Sentinel comparison figures and save to *output_dir*.
-
-    Parameters
-    ----------
-    naip_csv:              Path to NAIP-side VisDiff descriptions CSV.
-    sentinel_csv:          Path to Sentinel-side VisDiff descriptions CSV.
-    naip_png_dir:          Optional directory override for standard NAIP PNGs.
-    sentinel_png_dir:      Optional directory override for standard Sentinel PNGs.
-    output_dir:            Directory to write figures into (created if needed).
-    fmt:                   Output format — "png" or "pdf".
-    species_ids:           Comma-separated taxon IDs, or omit for all species in CSVs.
-    modalities:            Comma-separated modality list (must match fit results).
-    image_backbone:        Camera-trap image backbone name.
-    naip_sat_backbone:     Satellite backbone used for NAIP fit results.
-    sentinel_sat_backbone: Satellite backbone used for Sentinel fit results.
-    naip_imagery_source:   Imagery source used for the NAIP-side panels.
-    sentinel_imagery_source: Imagery source used for the Sentinel-side panels.
-    top_k:                 Number of top/bottom sites per group.
-    unique_weight:         Uniqueness weight for "unique" ranking mode.
-    n_images:              Thumbnails per source row (5 → 20 thumbnails total per species).
-    n_hypotheses:          Top-N hypotheses shown per source.
-    mode:                  Ranking mode: "standard" or "unique".
-    min_dist_km:           Minimum great-circle distance (km) between displayed sites.
-    dpi:                   Resolution for PNG output.
-    overwrite:             Re-render even if output file already exists.
-    """
+    """Render per-species NAIP vs Sentinel comparison figures and save to *output_dir*."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    naip_csv = Path(naip_csv) if naip_csv is not None else DEFAULT_VISDIFF_CSVS.get(naip_imagery_source, DEFAULT_NAIP_CSV)
-    sentinel_csv = Path(sentinel_csv) if sentinel_csv is not None else DEFAULT_VISDIFF_CSVS.get(sentinel_imagery_source, DEFAULT_SENTINEL_CSV)
+    naip_csv = (
+        Path(naip_csv)
+        if naip_csv is not None
+        else DEFAULT_VISDIFF_CSVS.get(naip_imagery_source, DEFAULT_NAIP_CSV)
+    )
+    sentinel_csv = (
+        Path(sentinel_csv)
+        if sentinel_csv is not None
+        else DEFAULT_VISDIFF_CSVS.get(sentinel_imagery_source, DEFAULT_SENTINEL_CSV)
+    )
     naip_png_dir = Path(naip_png_dir) if naip_png_dir is not None else None
     sentinel_png_dir = Path(sentinel_png_dir) if sentinel_png_dir is not None else None
     output_dir = Path(output_dir)
@@ -496,9 +617,9 @@ def main(
 
     mod_list = [m.strip() for m in modalities.split(",") if m.strip()]
 
-    LOGGER.info("Loading NAIP CSV:     %s", naip_csv)
+    LOGGER.info("Loading NAIP CSV: %s", naip_csv)
     LOGGER.info("Loading Sentinel CSV: %s", sentinel_csv)
-    LOGGER.info("NAIP imagery source:     %s", naip_imagery_source)
+    LOGGER.info("NAIP imagery source: %s", naip_imagery_source)
     LOGGER.info("Sentinel imagery source: %s", sentinel_imagery_source)
 
     def _load_visdiff(path: Path) -> pd.DataFrame:
@@ -513,9 +634,9 @@ def main(
     naip_visdiff = _load_visdiff(naip_csv)
     sentinel_visdiff = _load_visdiff(sentinel_csv)
 
-    # Union of species across both CSVs
-    all_ids = set(naip_visdiff["taxon_id"].unique()) | set(sentinel_visdiff["taxon_id"].unique())
-
+    all_ids = set(naip_visdiff["taxon_id"].unique()) | set(
+        sentinel_visdiff["taxon_id"].unique()
+    )
     if species_ids is None:
         focal_ids = sorted(all_ids)
     elif isinstance(species_ids, str):
